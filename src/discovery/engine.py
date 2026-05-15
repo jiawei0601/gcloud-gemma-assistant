@@ -27,7 +27,7 @@ class DiscoveryEngine:
         logger.info(f"正在針對『{query}』執行網路探索...")
         
         # 1. 執行搜尋
-        search_results = await self.search_provider.search(query, num_results=max_results := max_links + 2)
+        search_results = await self.search_provider.search(query, num_results=max_links + 2)
         if not search_results:
             logger.info("未找到相關搜尋結果。")
             return []
