@@ -12,12 +12,23 @@ from src.communication.telegram_adapter import TelegramAdapter
 # 加載環境變數
 load_dotenv()
 
+class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        # 抑制標準日誌以保持乾淨
+        return
+
 def run_health_check_server():
-    """啟動一個簡單的 HTTP Server 以通過 Cloud Run 的健康檢查"""
+    """啟動一個極簡的 HTTP Server 以通過 Cloud Run 的健康檢查"""
     port = int(os.getenv("PORT", "8080"))
-    server_address = ('', port)
-    httpd = http.server.HTTPServer(server_address, http.server.SimpleHTTPRequestHandler)
-    print(f"健康檢查伺服器已啟動於埠號 {port}")
+    server_address = ('0.0.0.0', port)
+    httpd = http.server.HTTPServer(server_address, HealthCheckHandler)
+    logging.info(f"✅ 健康檢查伺服器已啟動於 0.0.0.0:{port}")
     httpd.serve_forever()
 
 async def main():
