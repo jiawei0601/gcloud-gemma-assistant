@@ -1,5 +1,5 @@
 import logging
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from src.communication.handlers import TelegramCommandHandler
 from src.core.orchestrator import Orchestrator
 
@@ -24,6 +24,11 @@ class TelegramAdapter:
         # 註冊指令
         self.application.add_handler(CommandHandler("start", self.handler_logic.handle_start))
         self.application.add_handler(CommandHandler("research", self.handler_logic.handle_research))
+        
+        # 註冊一般訊息處理 (用於提示用戶)
+        self.application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handler_logic.handle_message))
+        # 註冊未知指令處理
+        self.application.add_handler(MessageHandler(filters.COMMAND, self.handler_logic.handle_message))
         
         logger.info("Telegram Adapter 已完成初始化並註冊處理器。")
 

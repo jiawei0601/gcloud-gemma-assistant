@@ -13,12 +13,15 @@ class TelegramCommandHandler:
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """處理 /start 指令"""
+        provider = os.getenv("INTELLIGENCE_PROVIDER", "gemini").upper()
+        model_info = "Gemini 3.1 Flash-Lite" if provider == "GEMINI" else "Gemma 4 26B"
+        
         await update.message.reply_text(
-            "🤖 **Gemma 4 研究助理已上線**\n\n"
-            "您可以使用以下指令：\n"
-            "/research <主題> - 啟動一項新的研究任務\n"
-            "/status - 查詢目前任務狀態\n\n"
-            "所有分析均由 Gemma 4 26B 模型驅動。"
+            f"🤖 **智能研究助理已上線**\n\n"
+            f"您可以使用以下指令：\n"
+            f"/research <主題> - 啟動一項新的研究任務\n"
+            f"/status - 查詢目前任務狀態\n\n"
+            f"當前雲端引擎：{model_info}"
         )
 
     async def handle_research(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,3 +56,13 @@ class TelegramCommandHandler:
         except Exception as e:
             logger.error(f"研究任務失敗：{e}", exc_info=True)
             await update.message.reply_text(f"❌ 抱歉，執行研究時發生錯誤：{str(e)}")
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """處理一般文字訊息"""
+        text = update.message.text
+        if not text.startswith('/'):
+            await update.message.reply_text(
+                "💡 **提示**：請使用 `/research <主題>` 來開始研究任務。\n"
+                "例如：`/research 永續能源的發展`"
+            )
+        else:
+            await update.message.reply_text(f"❓ 未知的指令。請確認拼字是否正確 (例如 `/research`)。")
