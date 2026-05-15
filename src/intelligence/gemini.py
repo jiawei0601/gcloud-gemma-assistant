@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class GeminiConfig:
     """Gemini API 整合的配置結構"""
-    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-1.5-flash-lite-001")
+    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-1.5-flash-002")
     project_id: str = os.getenv("GCP_PROJECT_ID")
     location: str = os.getenv("GCP_LOCATION", "asia-east1")
     temperature: float = 0.7
