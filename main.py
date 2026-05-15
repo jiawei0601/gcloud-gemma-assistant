@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 from src.core.orchestrator import Orchestrator
-from src.intelligence.gemma import GemmaIntelligenceProvider
+from src.intelligence.factory import IntelligenceFactory
 from src.communication.telegram_adapter import TelegramAdapter
 
 # 加載環境變數
@@ -17,9 +17,9 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # 1. 初始化核心組件
-    gemma_svc = GemmaIntelligenceProvider()
-    orchestrator = Orchestrator(intelligence_provider=gemma_svc)
+    # 1. 初始化核心組件 (透過工廠建立 Provider)
+    intelligence_svc = IntelligenceFactory.create_provider()
+    orchestrator = Orchestrator(intelligence_provider=intelligence_svc)
     
     # 2. 檢查 Telegram Token
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")

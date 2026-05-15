@@ -5,3 +5,4 @@ google-auth-oauthlib
 httpx
 python-dotenv
 python-telegram-bot
+google-cloud-aiplatform
