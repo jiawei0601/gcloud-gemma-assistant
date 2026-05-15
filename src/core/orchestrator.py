@@ -5,6 +5,7 @@ from typing import List, Optional
 from src.shared.models import ResearchTask, TaskStatus, InformationFragment, ResearchArtifact
 from src.intelligence.base import BaseIntelligenceProvider
 from src.discovery.engine import DiscoveryEngine
+from src.delivery.base import BaseDeliveryProvider
 from src.core.exceptions import AssistantError
 
 logger = logging.getLogger(__name__)
@@ -19,10 +20,11 @@ class Orchestrator:
         self,
         intelligence_provider: BaseIntelligenceProvider,
         discovery_engine: Optional[DiscoveryEngine] = None,
-        # 未來應加入 delivery provider
+        delivery_provider: Optional[BaseDeliveryProvider] = None
     ):
         self.intelligence = intelligence_provider
         self.discovery = discovery_engine or DiscoveryEngine()
+        self.delivery = delivery_provider
 
     async def run_research(self, goal: str, destination_folder: str) -> ResearchTask:
         """
@@ -49,9 +51,18 @@ class Orchestrator:
             task.artifacts.append(artifact)
             logger.info("✅ 綜合彙整完成。")
 
-            # 4. 交付階段 (目前模擬)
-            # 這裡應呼叫 DeliveryProvider
-            logger.info(f"✅ 交付階段（模擬）完成。報告將存放在：{destination_folder}")
+            # 4. 交付階段 (寫入 Google Drive)
+            if self.delivery:
+                doc_id = await self.delivery.create_document_from_text(
+                    title=artifact.title,
+                    content=artifact.content
+                )
+                link = await self.delivery.get_shareable_link(doc_id)
+                logger.info(f"✅ 交付階段完成。報告已存放在 Google Drive: {link}")
+                # 更新成果的 Metadata 以便後續存取
+                artifact.metadata["google_drive_link"] = link
+            else:
+                logger.info(f"⚠️ 未配置 Delivery Provider，僅完成模擬交付至：{destination_folder}")
 
             task.status = TaskStatus.COMPLETED
             task.update_timestamp()
