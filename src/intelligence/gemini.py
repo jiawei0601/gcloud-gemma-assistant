@@ -43,11 +43,12 @@ class GeminiIntelligenceProvider(BaseIntelligenceProvider):
     async def _execute_inference(self, system_instruction: str, user_prompt: str) -> str:
         token = await self._get_access_token()
         
-        # 嘗試使用的主 URL (預設區域)
-        primary_url = f"https://{self.config.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.config.location}/publishers/google/models/{self.config.model_id}:generateContent"
-        
-        # 備援 URL (Global/US-Central1，通常最新模型會先在此上線)
-        fallback_url = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/us-central1/publishers/google/models/{self.config.model_id}:generateContent"
+        # 定義嘗試順序：地區與模型的組合
+        attempts = [
+            {"loc": "asia-east1", "model": self.config.model_id},
+            {"loc": "us-central1", "model": self.config.model_id},
+            {"loc": "us-central1", "model": f"{self.config.model_id}-preview"}
+        ]
         
         headers = {
             "Authorization": f"Bearer {token}",
@@ -55,38 +56,28 @@ class GeminiIntelligenceProvider(BaseIntelligenceProvider):
         }
         
         payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": f"System Instruction: {system_instruction}\n\nUser: {user_prompt}"}]
-                }
-            ],
-            "generationConfig": {
-                "temperature": self.config.temperature,
-                "maxOutputTokens": self.config.max_output_tokens,
-                "topP": 0.95,
-            }
+            "contents": [{"role": "user", "parts": [{"text": f"System Instruction: {system_instruction}\n\nUser: {user_prompt}"}]}],
+            "generationConfig": {"temperature": self.config.temperature, "maxOutputTokens": self.config.max_output_tokens, "topP": 0.95}
         }
 
-        async def _make_request(url):
-            logger.info(f"正在向 {url} 發送請求...")
-            response = await self.client.post(url, headers=headers, json=payload)
-            return response
-
-        try:
-            # 優先嘗試區域端點
-            response = await _make_request(primary_url)
+        last_error = None
+        for attempt in attempts:
+            url = f"https://{attempt['loc']}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{attempt['loc']}/publishers/google/models/{attempt['model']}:generateContent"
+            logger.info(f"🚀 嘗試調用 Gemini: {attempt['loc']} | {attempt['model']}")
             
-            if response.status_code == 404:
-                logger.warning(f"區域端點 {self.config.location} 未找到模型，嘗試備援至 us-central1...")
-                response = await _make_request(fallback_url)
-                
-            response.raise_for_status()
-            result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text']
-        except Exception as e:
-            logger.error(f"Gemini API 呼叫失敗: {e}")
-            raise ModelInferenceError(f"Gemini API 錯誤：{str(e)}") from e
+            try:
+                response = await self.client.post(url, headers=headers, json=payload)
+                if response.status_code == 200:
+                    result = response.json()
+                    return result['candidates'][0]['content']['parts'][0]['text']
+                else:
+                    last_error = f"[{attempt['loc']}] {response.status_code}: {response.text[:100]}"
+                    logger.warning(f"❌ 嘗試失敗: {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"⚠️ 連線異常: {last_error}")
+        
+        raise ModelInferenceError(f"所有端點均失敗。最後錯誤：{last_error}")
 
     async def generate_plan(self, goal: str) -> List[str]:
         system_instruction = "你是一個專業的策略規劃 AI。請將研究任務拆解為 JSON 陣列格式的執行步驟。"
