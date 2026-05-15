@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class GeminiConfig:
     """Gemini API 整合的配置結構"""
-    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-3.1-flash-lite-preview")
+    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-3.1-flash-lite")
     project_id: str = os.getenv("GCP_PROJECT_ID")
-    location: str = os.getenv("GCP_LOCATION", "global")
+    location: str = os.getenv("GCP_LOCATION", "asia-east1")
     temperature: float = 0.7
     max_output_tokens: int = 2048
     timeout: int = 60
@@ -43,11 +43,8 @@ class GeminiIntelligenceProvider(BaseIntelligenceProvider):
     async def _execute_inference(self, system_instruction: str, user_prompt: str) -> str:
         token = await self._get_access_token()
         
-        # 處理 global 端點的 URL 格式
-        if self.config.location == "global":
-            url = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/us-central1/publishers/google/models/{self.config.model_id}:generateContent"
-        else:
-            url = f"https://{self.config.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.config.location}/publishers/google/models/{self.config.model_id}:generateContent"
+        # 使用區域端點 (GA 版本已支援)
+        url = f"https://{self.config.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.config.location}/publishers/google/models/{self.config.model_id}:generateContent"
         
         headers = {
             "Authorization": f"Bearer {token}",
