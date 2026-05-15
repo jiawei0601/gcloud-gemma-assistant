@@ -112,12 +112,19 @@ class TelegramCommandHandler:
             await update.message.reply_text(f"❌ 研究過程發生錯誤：{str(e)}")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """一般對話：交由總監直接回應"""
+        """一般對話：具備聯網搜尋能力的互動式助理"""
         if not update.message or not update.message.text:
             return
-            
-        success, result = self.gemini.ask(update.message.text)
-        if success:
-            await update.message.reply_text(result, parse_mode='Markdown')
+
+        user_text = update.message.text
+        
+        # 使用一個專門的「對話研究員」人設
+        CHAT_PERSONA = "你是「互動式研究助理」。請以專業且友善的口吻回答問題。你可以使用 Google 搜尋來獲取最新資訊，並提供精確的回答。"
+        
+        # 呼叫具備搜尋能力的專家接口
+        res = await self.gemini.ask_expert(CHAT_PERSONA, user_text, use_search=True)
+        
+        if res.get("success"):
+            await update.message.reply_text(res['text'], parse_mode='Markdown')
         else:
-            await update.message.reply_text(f"⚠️ 發生錯誤：{result}")
+            await update.message.reply_text(f"⚠️ 抱歉，查詢時發生錯誤：{res.get('text')}")
