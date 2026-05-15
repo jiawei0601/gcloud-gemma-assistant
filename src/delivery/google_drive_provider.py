@@ -56,7 +56,8 @@ class GoogleDriveProvider(BaseDeliveryProvider):
         service = await self.engine.get_service('drive', 'v3')
         
         # 簡單的 HTML 封裝以利格式轉換
-        html_content = f"<html><body><h2>{title}</h2><p>{content.replace('\n', '<br>')}</p></body></html>"
+        safe_content = content.replace('\n', '<br>')
+        html_content = f"<html><body><h2>{title}</h2><p>{safe_content}</p></body></html>"
         
         file_metadata = {
             'name': title,
