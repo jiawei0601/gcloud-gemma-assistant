@@ -4,3 +4,4 @@ google-auth-httplib2
 google-auth-oauthlib
 httpx
 python-dotenv
+python-telegram-bot
