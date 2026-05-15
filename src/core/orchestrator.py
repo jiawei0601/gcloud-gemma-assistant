@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from src.shared.models import ResearchTask, TaskStatus, InformationFragment, ResearchArtifact
 from src.intelligence.base import BaseIntelligenceProvider
+from src.discovery.engine import DiscoveryEngine
 from src.core.exceptions import AssistantError
 
 logger = logging.getLogger(__name__)
@@ -17,9 +18,11 @@ class Orchestrator:
     def __init__(
         self,
         intelligence_provider: BaseIntelligenceProvider,
-        # 未來應加入 discovery 與 delivery provider
+        discovery_engine: Optional[DiscoveryEngine] = None,
+        # 未來應加入 delivery provider
     ):
         self.intelligence = intelligence_provider
+        self.discovery = discovery_engine or DiscoveryEngine()
 
     async def run_research(self, goal: str, destination_folder: str) -> ResearchTask:
         """
@@ -36,14 +39,10 @@ class Orchestrator:
             task.description = f"執行計畫：{', '.join(plan)}"
             logger.info("✅ 規劃階段完成。")
 
-            # 2. 探索階段 (目前模擬)
-            # 這裡應呼叫 DiscoveryProvider
-            mock_fragment = InformationFragment(
-                content=f"關於 {goal} 的初步搜尋結果...",
-                source="https://example.com"
-            )
-            task.fragments.append(mock_fragment)
-            logger.info("✅ 探索階段（模擬）完成。")
+            # 2. 探索階段 (真實網路探索)
+            fragments = await self.discovery.fetch_information(goal)
+            task.fragments.extend(fragments)
+            logger.info(f"✅ 探索階段完成，取得 {len(fragments)} 個碎片。")
 
             # 3. 綜合階段 (Intelligence)
             artifact = await self.intelligence.summarize_artifacts(task)
