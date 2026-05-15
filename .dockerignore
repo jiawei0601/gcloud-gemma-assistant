@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+
+# 敏感資訊
+.env
+*.json
+*.pem
+*.key
+credentials.json
+token.json
+secrets/
+
+# 測試與文件
+tests/
+docs/
+*.md
+.dockerignore
+Dockerfile
+
+# Docker 相關
+.docker/
