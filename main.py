@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import http.server
+import threading
 from dotenv import load_dotenv
 
 from src.core.orchestrator import Orchestrator
@@ -10,6 +12,14 @@ from src.communication.telegram_adapter import TelegramAdapter
 # 加載環境變數
 load_dotenv()
 
+def run_health_check_server():
+    """啟動一個簡單的 HTTP Server 以通過 Cloud Run 的健康檢查"""
+    port = int(os.getenv("PORT", "8080"))
+    server_address = ('', port)
+    httpd = http.server.HTTPServer(server_address, http.server.SimpleHTTPRequestHandler)
+    print(f"健康檢查伺服器已啟動於埠號 {port}")
+    httpd.serve_forever()
+
 async def main():
     # 配置日誌
     logging.basicConfig(
@@ -17,7 +27,10 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # 1. 初始化核心組件 (透過工廠建立 Provider)
+    # 1. 啟動健康檢查伺服器（背景執行）
+    threading.Thread(target=run_health_check_server, daemon=True).start()
+
+    # 2. 初始化核心組件 (透過工廠建立 Provider)
     intelligence_svc = IntelligenceFactory.create_provider()
     orchestrator = Orchestrator(intelligence_provider=intelligence_svc)
     
