@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class GeminiConfig:
     """Gemini API 整合的配置結構"""
-    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-1.5-flash-002")
+    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-3.1-pro")
     project_id: str = os.getenv("GCP_PROJECT_ID")
     location: str = os.getenv("GCP_LOCATION", "asia-east1")
     temperature: float = 0.7
@@ -43,9 +43,11 @@ class GeminiIntelligenceProvider(BaseIntelligenceProvider):
     async def _execute_inference(self, system_instruction: str, user_prompt: str) -> str:
         token = await self._get_access_token()
         
-        # 使用區域端點 (GA 版本已支援)
-        url = f"https://{self.config.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.config.location}/publishers/google/models/{self.config.model_id}:generateContent"
-        logger.info(f"DEBUG: 發送請求至 URL: {url}")
+        # 嘗試使用的主 URL (預設區域)
+        primary_url = f"https://{self.config.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.config.location}/publishers/google/models/{self.config.model_id}:generateContent"
+        
+        # 備援 URL (Global/US-Central1，通常最新模型會先在此上線)
+        fallback_url = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/us-central1/publishers/google/models/{self.config.model_id}:generateContent"
         
         headers = {
             "Authorization": f"Bearer {token}",
@@ -66,13 +68,24 @@ class GeminiIntelligenceProvider(BaseIntelligenceProvider):
             }
         }
 
-        try:
+        async def _make_request(url):
+            logger.info(f"正在向 {url} 發送請求...")
             response = await self.client.post(url, headers=headers, json=payload)
+            return response
+
+        try:
+            # 優先嘗試區域端點
+            response = await _make_request(primary_url)
+            
+            if response.status_code == 404:
+                logger.warning(f"區域端點 {self.config.location} 未找到模型，嘗試備援至 us-central1...")
+                response = await _make_request(fallback_url)
+                
             response.raise_for_status()
             result = response.json()
             return result['candidates'][0]['content']['parts'][0]['text']
         except Exception as e:
-            logger.error(f"Gemini REST API 呼叫失敗: {e}")
+            logger.error(f"Gemini API 呼叫失敗: {e}")
             raise ModelInferenceError(f"Gemini API 錯誤：{str(e)}") from e
 
     async def generate_plan(self, goal: str) -> List[str]:
