@@ -1,83 +1,141 @@
+import os
 import logging
+import json
 import asyncio
+import threading
+from flask import Flask, request, jsonify
+from dotenv import load_dotenv
+
+# 強制刷新 stdout
 import sys
-from flask import Flask, request
-from telegram import Update, Bot
-from google.cloud import firestore
-
-from config import config
-from src.clients.gemini_client import gemini_client
-from src.communication.handlers import TelegramCommandHandler
-
-# 強制刷新日誌
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(line_buffering=True)
 
+load_dotenv()
+
+# 配置全局日誌
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
     level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     stream=sys.stdout
 )
-logger = logging.getLogger("BotEntry")
+logger = logging.getLogger("Bot")
 
 app = Flask(__name__)
 
-def is_duplicate_update(update_id):
-    """使用 Firestore 進行訊息去重"""
-    try:
-        db = firestore.Client(project=config.PROJECT_ID)
-        # 在 webhook_locks 集合中建立文件
-        doc_ref = db.collection('webhook_locks').document(str(update_id))
+# 全域組件
+tg_adapter = None
+firestore_client = None
+update_queue = None
+main_loop = None
+
+async def update_worker(queue, adapter, firestore):
+    """
+    背景工作者：從 Queue 取出更新並處理。
+    """
+    logger.info("👷 [Worker] 背景工作者啟動。")
+    while True:
+        update_json = await queue.get()
+        update_id = update_json.get("update_id")
         
-        # 使用 create()：如果文件已存在會報錯，以此作為分散式鎖
-        doc_ref.create({
-            'timestamp': firestore.SERVER_TIMESTAMP,
-            'status': 'processing'
-        })
-        return False # 成功建立，是第一筆請求
-    except Exception as e:
-        if "AlreadyExists" in str(e) or "409" in str(e):
-            return True # 已存在，是重複請求
-        logger.error(f"[Deduplication] 檢查失敗: {e}")
-        return False # 資料庫問題時放行，避免服務中斷
+        if not update_id:
+            queue.task_done()
+            continue
 
-async def handle_update(data):
-    bot = Bot(token=config.TELEGRAM_TOKEN)
-    update = Update.de_json(data, bot)
-    
-    # 執行去重檢查
-    if update.update_id and is_duplicate_update(update.update_id):
-        logger.info(f"[Deduplication] 忽略重複請求: {update.update_id}")
-        return
+        try:
+            # 1. Firestore 原子鎖定 (去重)
+            is_new = await firestore.try_lock(update_id)
+            
+            if is_new:
+                logger.info(f"🆕 [Worker] 處理新更新: {update_id}")
+                # 2. 處理更新
+                if adapter:
+                    await adapter.process_update(update_json)
+                await firestore.mark_completed(update_id)
+            else:
+                logger.info(f"⏭️ [Worker] 跳過重複更新: {update_id}")
+                
+        except Exception as e:
+            logger.error(f"💥 [Worker] 處理失敗 ({update_id}): {e}", exc_info=True)
+            try:
+                await firestore.mark_failed(update_id, str(e))
+            except: pass
+        finally:
+            queue.task_done()
 
-    handlers = TelegramCommandHandler(gemini_client)
+
+# 初始化組件
+def initialize_components():
+    global tg_adapter, firestore_client, update_queue, main_loop
     
-    if update.message and update.message.text:
-        text = update.message.text
-        if text.startswith('/start'):
-            await handlers.handle_start(update, None)
-        elif text.startswith('/research'):
-            parts = text.split(None, 1)
-            class MockContext:
-                def __init__(self, args): self.args = args
-            context = MockContext(parts[1].split() if len(parts) > 1 else [])
-            await handlers.handle_research(update, context)
-        else:
-            await handlers.handle_message(update, None)
+    from src.clients.gemini_client import gemini_client
+    from src.communication.telegram_adapter import TelegramAdapter
+    from src.shared.firestore_client import FirestoreClient
+    from config import config
+    
+    # 1. 初始化 Firestore
+    firestore_client = FirestoreClient(project_id=config.PROJECT_ID)
+    
+    # 2. 初始化 Telegram Adapter
+    tg_adapter = TelegramAdapter(config.TELEGRAM_TOKEN, gemini_client)
+    
+    # 3. 建立 Async Loop
+    main_loop = asyncio.new_event_loop()
+    
+    # 4. 啟動背景線程
+    def run_loop():
+        asyncio.set_event_loop(main_loop)
+        # 在 loop 內建立 Queue
+        global update_queue
+        update_queue = asyncio.Queue()
+        
+        main_loop.create_task(update_worker(update_queue, tg_adapter, firestore_client))
+        main_loop.run_forever()
+
+    t = threading.Thread(target=run_loop, daemon=True)
+    t.start()
+    
+    # 等待 Queue 初始化 (極短時間)
+    import time
+    for _ in range(10):
+        if update_queue is not None: break
+        time.sleep(0.1)
+
+    # 5. 初始化 Telegram (異步)
+    asyncio.run_coroutine_threadsafe(tg_adapter.initialize(), main_loop)
+    
+    # 6. 設定 Webhook (異步)
+    if config.WEBHOOK_URL:
+        asyncio.run_coroutine_threadsafe(
+            tg_adapter.run_webhook(config.WEBHOOK_URL, config.PORT), 
+            main_loop
+        )
+    
+    logger.info("💎 [SYSTEM] 組件初始化完成。")
+
+# 首次請求時初始化 (或者在模組層級，視部署環境而定)
+with app.app_context():
+    initialize_components()
 
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
+    """
+    Telegram Webhook 進入點
+    """
     try:
-        data = request.get_json(force=True)
-        asyncio.run(handle_update(data))
-        return 'ok', 200
+        update_json = request.get_json()
+        if update_json and update_queue and main_loop:
+            # 極速放入 Queue
+            main_loop.call_soon_threadsafe(update_queue.put_nowait, update_json)
+        return 'OK', 200
     except Exception as e:
-        logger.error(f"[Webhook] 處理失敗: {e}", exc_info=True)
-        return 'ok', 200 # 即使失敗也回傳 200，停止 Telegram 的自動重試
+        logger.error(f"Webhook Route Error: {e}")
+        return 'Error', 500
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return 'Gemma Assistant (Stabilized with Deduplication) is active', 200
+    return 'OK', 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=config.PORT)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)

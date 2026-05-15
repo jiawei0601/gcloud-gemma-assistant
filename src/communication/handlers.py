@@ -2,19 +2,20 @@ import logging
 import asyncio
 from telegram import Update
 from telegram.ext import ContextTypes
-from src.clients.gemini_client import gemini_client
 
 logger = logging.getLogger(__name__)
 
-# --- 研究團隊人設定義 (保持不變) ---
-PROMPT_DATA_COLLECTOR = "你是「數據與事實搜集員」。你的任務是搜集最精確、最新的事實。"
-PROMPT_CONTEXT_ANALYST = "你是「背景與脈絡分析師」。你的任務是分析前因後果。"
-PROMPT_IMPACT_ASSESSOR = "你是「趨勢與影響評估師」。你的任務是預測未來影響。"
-PROMPT_CHIEF_EDITOR = "你是「首席研究總監」。你的任務是彙整成最終報告。"
+# --- 研究團隊人設定義 ---
+PROMPT_DATA_COLLECTOR = "你是「數據與事實搜集員」。你的任務是搜尋與提供最精確、最新的事實數據。請列出關鍵數據點。"
+PROMPT_CONTEXT_ANALYST = "你是「背景與脈絡分析師」。你的任務是分析主題的歷史背景、現狀以及相關的產業脈絡。"
+PROMPT_IMPACT_ASSESSOR = "你是「趨勢與影響評估師」。你的任務是根據現有資訊預測未來的可能發展方向與潛在影響。"
+PROMPT_CHIEF_EDITOR = "你是「首席研究總監」。你的任務是將各專家的分析結果整合成一份結構完整、專業且具備深度見解的最終報告。請使用 Markdown 格式。"
 
 class TelegramCommandHandler:
     def __init__(self, gemini_client):
         self.gemini = gemini_client
+        # 限制同時運行的 Agent 數量，避免 API 速率限制
+        self.semaphore = asyncio.Semaphore(5)
 
     async def _safe_send_or_edit(self, message, text, parse_mode='Markdown'):
         """安全地發送或編輯訊息，支援 Markdown 失敗回退"""
@@ -27,53 +28,89 @@ class TelegramCommandHandler:
             if "Can't parse entities" in str(e):
                 logger.warning(f"Markdown 解析失敗，切換至純文字發送: {e}")
                 if hasattr(message, 'edit_text'):
-                    await message.edit_text(text) # 不帶 parse_mode
+                    await message.edit_text(text)
                 else:
                     await message.reply_text(text)
+            elif "Message is not modified" in str(e):
+                pass
             else:
-                raise e
+                logger.error(f"發送訊息失敗: {e}")
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        welcome_text = "🚀 **專業研究助理已啟動**\n請使用指令 `/research <主題>` 或直接對話。"
+        welcome_text = "🚀 **專業研究助理 (Multi-Agent) 已啟動**\n\n可用指令：\n- `/research <主題>`：啟動深度專案研究\n- 直接輸入問題：啟動快速互動查詢"
         await self._safe_send_or_edit(update.message, welcome_text)
+
+    async def _run_agent_task(self, persona: str, topic: str, use_search: bool = True):
+        """運行單個 Agent 任務的包裝器"""
+        async with self.semaphore:
+            return await asyncio.to_thread(self.gemini.ask_expert_sync, persona, topic, use_search=use_search)
 
     async def handle_research(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
-            await update.message.reply_text("請提供研究主題。")
+            await update.message.reply_text("請提供研究主題。範例：`/research 低空經濟發展`")
             return
 
         topic = " ".join(context.args)
-        status_msg = await update.message.reply_text(f"🔍 **啟動專案研究：{topic}**\n正在指派專家團隊...")
+        status_msg = await update.message.reply_text(f"🔍 **啟動專案研究：{topic}**\n\n[⏳] 正在召集專家團隊...")
 
         try:
+            # 1. 第一階段：專家並行分析
+            await self._safe_send_or_edit(status_msg, f"🔍 **專案：{topic}**\n\n[⚙️] 專家正在進行獨立分析...")
+            
             tasks = [
-                asyncio.to_thread(self.gemini.ask_expert_sync, PROMPT_DATA_COLLECTOR, f"主題：{topic}"),
-                asyncio.to_thread(self.gemini.ask_expert_sync, PROMPT_CONTEXT_ANALYST, f"主題：{topic}"),
-                asyncio.to_thread(self.gemini.ask_expert_sync, PROMPT_IMPACT_ASSESSOR, f"主題：{topic}")
+                self._run_agent_task(PROMPT_DATA_COLLECTOR, f"研究主題：{topic}"),
+                self._run_agent_task(PROMPT_CONTEXT_ANALYST, f"研究主題：{topic}"),
+                self._run_agent_task(PROMPT_IMPACT_ASSESSOR, f"研究主題：{topic}")
             ]
             
-            results = await asyncio.gather(*tasks)
+            # return_exceptions=True 確保即使其中一個失敗也不會中斷全部
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            cio_input = f"數據：{results[0]['text']}\n背景：{results[1]['text']}\n影響：{results[2]['text']}"
+            # 2. 彙整結果與處理異常
+            agent_outputs = []
+            expert_names = ["數據搜集", "脈絡分析", "趨勢評估"]
+            for i, res in enumerate(results):
+                if isinstance(res, Exception):
+                    logger.error(f"{expert_names[i]} 失敗: {res}")
+                    agent_outputs.append(f"[{expert_names[i]}] 錯誤: 無法取得資訊")
+                elif not res.get("success"):
+                    logger.error(f"{expert_names[i]} 報錯: {res.get('text')}")
+                    agent_outputs.append(f"[{expert_names[i]}] 報錯: {res.get('text')}")
+                else:
+                    agent_outputs.append(f"### {expert_names[i]}分析\n{res['text']}")
+
+            # 3. 第二階段：總編輯彙整
+            await self._safe_send_or_edit(status_msg, f"🔍 **專案：{topic}**\n\n[✅] 專家分析完成\n[✍️] 首席總編輯正在撰寫報告...")
             
-            final_res = await asyncio.to_thread(self.gemini.ask_expert_sync, PROMPT_CHIEF_EDITOR, cio_input, use_search=False)
+            cio_input = "\n\n".join(agent_outputs)
+            final_res = await self._run_agent_task(PROMPT_CHIEF_EDITOR, f"請彙整以下專家意見：\n{cio_input}", use_search=False)
             
-            await self._safe_send_or_edit(status_msg, final_res['text'])
+            if final_res.get("success"):
+                await self._safe_send_or_edit(status_msg, final_res['text'])
+            else:
+                await self._safe_send_or_edit(status_msg, f"❌ 報告生成失敗：{final_res.get('text')}")
 
         except Exception as e:
-            logger.error(f"研究流程報錯: {e}")
-            await update.message.reply_text(f"❌ 發生錯誤：{e}")
+            logger.error(f"研究流程重大報錯: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ 發生非預期錯誤：{e}")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message or not update.message.text:
             return
 
         user_text = update.message.text
-        CHAT_PERSONA = "你是「互動式研究助理」。請具備搜尋能力回答問題。"
+        if user_text.startswith('/'): return
+
+        CHAT_PERSONA = "你是「互動式研究助理」。請具備搜尋能力回答問題。請盡量提供詳細且專業的回答。"
         
-        res = await asyncio.to_thread(self.gemini.ask_expert_sync, CHAT_PERSONA, user_text, use_search=True)
+        # 發送等待狀態
+        wait_msg = await update.message.reply_text("🤔 正在思考...")
         
-        if res.get("success"):
-            await self._safe_send_or_edit(update.message, res['text'])
-        else:
-            await update.message.reply_text(f"⚠️ 報錯：{res.get('text')}")
+        try:
+            res = await self._run_agent_task(CHAT_PERSONA, user_text, use_search=True)
+            if res.get("success"):
+                await self._safe_send_or_edit(wait_msg, res['text'])
+            else:
+                await self._safe_send_or_edit(wait_msg, f"⚠️ 抱錯：{res.get('text')}")
+        except Exception as e:
+            await self._safe_send_or_edit(wait_msg, f"❌ 查詢失敗：{e}")

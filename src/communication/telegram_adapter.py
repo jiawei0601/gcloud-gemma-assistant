@@ -8,10 +8,10 @@ from src.communication.handlers import TelegramCommandHandler
 logger = logging.getLogger(__name__)
 
 class TelegramAdapter:
-    def __init__(self, token: str, orchestrator: Orchestrator):
+    def __init__(self, token: str, client: any):
         self.application = Application.builder().token(token).build()
-        self.orchestrator = orchestrator
-        self.handlers = TelegramCommandHandler(orchestrator)
+        self.client = client
+        self.handlers = TelegramCommandHandler(client)
         self._setup_handlers()
 
     def _setup_handlers(self):
@@ -29,9 +29,10 @@ class TelegramAdapter:
     async def send_startup_notification(self, admin_id: str):
         """發送啟動通知給管理員"""
         try:
+            from config import config
             await self.application.bot.send_message(
                 chat_id=admin_id,
-                text=f"🤖 **Gemma 4 研究助理已上線 (Webhook 模式)**\n\n當前引擎：`Gemini 3.1 Pro (Resilient)`\n機房位置：`Cloud Run (asia-east1)`\n狀態：已準備好執行任務。"
+                text=f"🤖 **Gemma 4 研究助理已上線 (穩定版)**\n\n當前引擎：`{config.GEMINI_MODEL_ID}`\n去重機制：`Firestore Atomic (Enabled)`\n架構模式：`Flask + Async Queue`\n狀態：已準備好執行任務。"
             )
         except Exception as e:
             logger.error(f"發送啟動通知失敗: {e}")
