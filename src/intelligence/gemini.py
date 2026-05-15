@@ -52,7 +52,8 @@ class GeminiIntelligenceProvider(BaseIntelligenceProvider):
         
         headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-Goog-User-Project": self.project_id
         }
         
         payload = {
@@ -62,8 +63,9 @@ class GeminiIntelligenceProvider(BaseIntelligenceProvider):
 
         last_error = None
         for attempt in attempts:
-            url = f"https://{attempt['loc']}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{attempt['loc']}/publishers/google/models/{attempt['model']}:generateContent"
-            logger.info(f"🚀 嘗試調用 Gemini: {attempt['loc']} | {attempt['model']}")
+            # 切換至 v1beta1 以獲得最佳相容性
+            url = f"https://{attempt['loc']}-aiplatform.googleapis.com/v1beta1/projects/{self.project_id}/locations/{attempt['loc']}/publishers/google/models/{attempt['model']}:generateContent"
+            logger.info(f"🚀 嘗試調用 Gemini (v1beta1): {attempt['loc']} | {attempt['model']}")
             
             try:
                 response = await self.client.post(url, headers=headers, json=payload)
