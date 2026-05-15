@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class GeminiConfig:
     """Gemini API 整合的配置結構"""
-    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-3.1-flash-lite")
+    model_id: str = "gemini-3.1-flash-lite" # 強制寫死以排除環境變數干擾
     project_id: str = os.getenv("GCP_PROJECT_ID")
     location: str = os.getenv("GCP_LOCATION", "asia-east1")
     temperature: float = 0.7
@@ -45,6 +45,7 @@ class GeminiIntelligenceProvider(BaseIntelligenceProvider):
         
         # 使用區域端點 (GA 版本已支援)
         url = f"https://{self.config.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.config.location}/publishers/google/models/{self.config.model_id}:generateContent"
+        logger.info(f"DEBUG: 發送請求至 URL: {url}")
         
         headers = {
             "Authorization": f"Bearer {token}",
