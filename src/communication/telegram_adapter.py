@@ -18,11 +18,14 @@ class TelegramAdapter:
         """初始化 Telegram Application 並註冊處理器"""
         self.application = ApplicationBuilder().token(self.bot_token).build()
         
+        # 顯式初始化 (PTB 20.x 必需)
+        await self.application.initialize()
+        
         # 註冊指令
         self.application.add_handler(CommandHandler("start", self.handler_logic.handle_start))
         self.application.add_handler(CommandHandler("research", self.handler_logic.handle_research))
         
-        logger.info("Telegram Adapter 已完成初始化。")
+        logger.info("Telegram Adapter 已完成初始化並註冊處理器。")
 
     async def run(self):
         """啟動 Bot"""
