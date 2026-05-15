@@ -31,3 +31,17 @@ class TelegramAdapter:
             
         logger.info("Telegram Bot 正在啟動輪詢...")
         await self.application.run_polling()
+
+    async def send_startup_notification(self, chat_id: str):
+        """啟動時發送通知給管理員"""
+        if not self.application:
+            await self.initialize()
+            
+        try:
+            await self.application.bot.send_message(
+                chat_id=chat_id,
+                text="🚀 **Gemma AI Research Assistant 已成功部屬並啟動！**\n\n目前正在 Google Cloud Run 上運行，隨時準備為您服務。"
+            )
+            logger.info(f"已發送啟動通知給管理員: {chat_id}")
+        except Exception as e:
+            logger.error(f"發送啟動通知失敗: {e}")

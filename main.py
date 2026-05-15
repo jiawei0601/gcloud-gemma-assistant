@@ -61,6 +61,13 @@ async def main():
         if bot_token:
             logger.info("檢測到 TELEGRAM_BOT_TOKEN，正在啟動 Telegram 助理模式...")
             tg_adapter = TelegramAdapter(bot_token, orchestrator)
+            
+            # 啟動時發送通知給管理員 (若有設定)
+            admin_id = os.getenv("ADMIN_CHAT_ID")
+            if admin_id:
+                # 建立一個非同步任務來發送通知，以免阻塞啟動流程
+                asyncio.create_task(tg_adapter.send_startup_notification(admin_id))
+                
             await tg_adapter.run()
         else:
             logger.warning("未檢測到 TELEGRAM_BOT_TOKEN，進入 CLI 閒置模式。")
