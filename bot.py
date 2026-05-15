@@ -59,14 +59,18 @@ def telegram_webhook():
     """處理來自 Telegram 的 Webhook 請求"""
     try:
         data = request.get_json(force=True)
-        # 每個請求建立獨立 loop，避免 Cloud Run 環境併發衝突
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        
+        # 取得或建立當前執行緒的事件迴圈
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         
         # 確保系統已初始化
         loop.run_until_complete(ensure_initialized())
         
-        # 封裝 Update 並處理
+        # 直接處理更新，避免過度依賴 Application 的內部狀態切換
         update = Update.de_json(data, application.bot)
         loop.run_until_complete(application.process_update(update))
         
@@ -74,9 +78,6 @@ def telegram_webhook():
     except Exception as e:
         logger.error(f"[Webhook] 處理失敗: {e}", exc_info=True)
         return 'error', 500
-    finally:
-        if 'loop' in locals():
-            loop.close()
 
 @app.route('/', methods=['GET'])
 def health_check():

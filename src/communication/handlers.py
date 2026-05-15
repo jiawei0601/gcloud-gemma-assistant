@@ -36,7 +36,8 @@ class TelegramCommandHandler:
         # 在分析師架構中，我們直接請求模型進行多維度分析
         prompt = f"請擔任資深市場分析師，針對主題『{topic}』進行深度研究。請涵蓋：1. 現況概述 2. 潛在影響 3. 未來展望。請以 Markdown 格式輸出。"
         
-        success, result = self.gemini.ask(prompt)
+        import asyncio
+        success, result = await asyncio.to_thread(self.gemini.ask, prompt)
 
         if success:
             await status_msg.edit_text(result, parse_mode='Markdown')
@@ -51,7 +52,8 @@ class TelegramCommandHandler:
         user_text = update.message.text
         # 如果是群組訊息且沒有提到機器人，則忽略（除非是私訊）
         
-        success, result = self.gemini.ask(user_text)
+        import asyncio
+        success, result = await asyncio.to_thread(self.gemini.ask, user_text)
         
         if success:
             await update.message.reply_text(result, parse_mode='Markdown')
