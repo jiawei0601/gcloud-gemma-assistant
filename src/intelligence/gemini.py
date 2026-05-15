@@ -1,11 +1,12 @@
 import os
 import logging
 import asyncio
+import json
+import httpx
+import google.auth
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-
-import vertexai
-from vertexai.generative_models import GenerativeModel, SafetySetting, Part
+from google.auth.transport.requests import Request
 
 from src.intelligence.base import BaseIntelligenceProvider
 from src.core.exceptions import IntelligenceProviderError, ModelInferenceError
@@ -16,62 +17,59 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class GeminiConfig:
     """Gemini API 整合的配置結構"""
-    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-3.1-flash-lite") # 預設使用 3.1 Flash-Lite
+    model_id: str = os.getenv("GEMINI_MODEL_ID", "gemini-1.5-flash-lite-001")
     project_id: str = os.getenv("GCP_PROJECT_ID")
-    location: str = os.getenv("GCP_LOCATION", "us-central1")
+    location: str = os.getenv("GCP_LOCATION", "asia-east1")
     temperature: float = 0.7
     max_output_tokens: int = 2048
     timeout: int = 60
 
 class GeminiIntelligenceProvider(BaseIntelligenceProvider):
     """
-    Google Cloud Vertex AI Gemini 智慧供應商實作。
-    
-    用於生產環境，提供強大的多模態與長文本處理能力。
+    輕量化 Gemini 供應商：使用 REST API 替代重型 SDK。
     """
-
+    
     def __init__(self, config: Optional[GeminiConfig] = None):
         self.config = config or GeminiConfig()
-        
-        if not self.config.project_id:
-            logger.warning("未設定 GCP_PROJECT_ID，Gemini Provider 可能無法正常運作。")
-        else:
-            vertexai.init(project=self.config.project_id, location=self.config.location)
-            self.model = GenerativeModel(self.config.model_id)
-            logger.info(f"已初始化 GeminiIntelligenceProvider，模型：{self.config.model_id}")
+        self.project_id = self.config.project_id
+        self.credentials, _ = google.auth.default()
+        self.client = httpx.AsyncClient(timeout=float(self.config.timeout))
+
+    async def _get_access_token(self):
+        if not self.credentials.valid:
+            self.credentials.refresh(Request())
+        return self.credentials.token
 
     async def _execute_inference(self, system_instruction: str, user_prompt: str) -> str:
-        """
-        執行 Vertex AI Gemini 推論。
-        """
-        if not self.config.project_id:
-            raise IntelligenceProviderError("GCP_PROJECT_ID 未設定，無法執行 Gemini 推論。")
+        token = await self._get_access_token()
+        url = f"https://{self.config.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.config.location}/publishers/google/models/{self.config.model_id}:generateContent"
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": f"System Instruction: {system_instruction}\n\nUser: {user_prompt}"}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": self.config.temperature,
+                "maxOutputTokens": self.config.max_output_tokens,
+                "topP": 0.95,
+            }
+        }
 
         try:
-            # 使用同步方法但封裝在 run_in_executor 中（Vertex AI SDK 目前主要是同步的）
-            loop = asyncio.get_event_loop()
-            
-            # 配置生成參數
-            generation_config = {
-                "max_output_tokens": self.config.max_output_tokens,
-                "temperature": self.config.temperature,
-                "top_p": 0.95,
-            }
-
-            # 執行推論
-            # 注意：這裡將 system_instruction 放入內容中，或是使用新版 SDK 的 system_instruction 參數
-            response = await loop.run_in_executor(
-                None, 
-                lambda: self.model.generate_content(
-                    [f"System Instruction: {system_instruction}\n\nUser: {user_prompt}"],
-                    generation_config=generation_config
-                )
-            )
-            
-            return response.text
-
+            response = await self.client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            return result['candidates'][0]['content']['parts'][0]['text']
         except Exception as e:
-            logger.error(f"Gemini 推論失敗：{str(e)}", exc_info=True)
+            logger.error(f"Gemini REST API 呼叫失敗: {e}")
             raise ModelInferenceError(f"Gemini API 錯誤：{str(e)}") from e
 
     async def generate_plan(self, goal: str) -> List[str]:
