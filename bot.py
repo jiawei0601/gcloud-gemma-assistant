@@ -26,17 +26,14 @@ app = Flask(__name__)
 application = None
 handlers = None
 
-async def ensure_initialized():
+async def setup_application():
+    """初始化 Telegram Application (異步)"""
     global application, handlers
     if application is None:
-        logger.info("[Init] 正在初始化系統組件 (採用分析師專案結構)...")
-        
-        # 初始化 Telegram Application
-        # 注意：我們不需要傳入 Orchestrator 了，直接在 Handlers 裡調用 Client
+        logger.info("[Init] 正在初始化研究助理系統...")
         application = Application.builder().token(config.TELEGRAM_TOKEN).build()
         handlers = TelegramCommandHandler(gemini_client)
         
-        # 註冊處理邏輯 (模仿 Adapter 的行為)
         from telegram.ext import CommandHandler, MessageHandler, filters
         application.add_handler(CommandHandler("start", handlers.handle_start))
         application.add_handler(CommandHandler("research", handlers.handle_research))
@@ -46,34 +43,24 @@ async def ensure_initialized():
         await application.initialize()
         await application.start()
         
-        # 設定 Webhook (確保路徑正確)
         if config.WEBHOOK_URL:
             webhook_full_url = f"{config.WEBHOOK_URL}/telegram"
-            logger.info(f"[Init] 設定 Webhook: {webhook_full_url}")
             await application.bot.set_webhook(url=webhook_full_url, drop_pending_updates=True)
-            
-        logger.info("[Init] 初始化完成。")
+            logger.info(f"[Init] Webhook 已註冊: {webhook_full_url}")
+
+async def process_update(data):
+    """核心處理流程 (與參考專案一致)"""
+    await setup_application()
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
 
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
     """處理來自 Telegram 的 Webhook 請求"""
     try:
         data = request.get_json(force=True)
-        
-        # 取得或建立當前執行緒的事件迴圈
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # 確保系統已初始化
-        loop.run_until_complete(ensure_initialized())
-        
-        # 直接處理更新，避免過度依賴 Application 的內部狀態切換
-        update = Update.de_json(data, application.bot)
-        loop.run_until_complete(application.process_update(update))
-        
+        # 採用參考專案的穩定模式：直接啟動 asyncio.run
+        asyncio.run(process_update(data))
         return 'ok', 200
     except Exception as e:
         logger.error(f"[Webhook] 處理失敗: {e}", exc_info=True)
@@ -81,10 +68,8 @@ def telegram_webhook():
 
 @app.route('/', methods=['GET'])
 def health_check():
-    """健康檢查端點"""
-    return 'Gemma Assistant is running', 200
+    return 'Research Assistant is active', 200
 
 if __name__ == '__main__':
-    # 啟動 Flask
-    logger.info(f"🚀 啟動 Gemma 助理服務，Port: {config.PORT}")
+    logger.info(f"🚀 啟動研究助理服務，Port: {config.PORT}")
     app.run(host='0.0.0.0', port=config.PORT)

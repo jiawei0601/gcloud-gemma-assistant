@@ -1,49 +1,70 @@
 import logging
+import asyncio
 from google import genai
-from typing import Tuple
+from google.genai import types
+from typing import Tuple, Dict, Any
 from config import config
 
 class GeminiClient:
     def __init__(self):
         self.project_id = config.PROJECT_ID
         self.location = config.LOCATION
-        self.model_id = config.GEMINI_MODEL_ID
+        self.model_id = "gemini-2.0-flash" # 使用具備強大搜尋與並行能力的 flash 版本，或依需求調整
         
-        # 初始化 2026 版 GenAI 客戶端
-        # 使用 vertexai=True 確保透過 Vertex AI 調用
         try:
             self.client = genai.Client(
                 vertexai=True, 
                 project=self.project_id, 
                 location=self.location
             )
-            logging.info(f"[GeminiClient] 已初始化 (Project: {self.project_id}, Location: {self.location})")
+            logging.info(f"[GeminiClient] 專業版初始化成功 (Project: {self.project_id})")
         except Exception as e:
             logging.error(f"[GeminiClient] 初始化失敗: {e}")
             self.client = None
 
-    def ask(self, prompt: str) -> Tuple[bool, str]:
+    async def ask_expert(self, persona: str, prompt: str, use_search: bool = True) -> Dict[str, Any]:
         """
-        執行推理任務。回傳 (成功與否, 回應內容或錯誤訊息)。
+        異步調用特定人設的專家 Agent。
         """
         if not self.client:
-            return False, "Gemini Client 未能正確初始化。"
-            
+            return {"text": "Client 未初始化", "success": False}
+
+        tools = [types.Tool(google_search=types.GoogleSearch())] if use_search else []
+        
         try:
-            logging.info(f"[GeminiClient] 正在調用模型 {self.model_id}...")
-            # 使用 SDK 的標準生成方法
+            # 使用 aio 異步接口進行非阻塞調用
+            response = await self.client.aio.models.generate_content(
+                model=self.model_id,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=persona,
+                    tools=tools,
+                    temperature=0.2,
+                )
+            )
+            
+            return {
+                "success": True,
+                "text": response.text if response.text else "無回應內容",
+                "usage": response.usage_metadata
+            }
+        except Exception as e:
+            logging.error(f"[GeminiClient] 專家調用失敗: {e}")
+            return {"success": False, "text": str(e)}
+
+    def ask(self, prompt: str) -> Tuple[bool, str]:
+        """
+        傳統同步接口 (保留相容性，內部執行簡單生成)
+        """
+        if not self.client:
+            return False, "Client 未初始化"
+        try:
             response = self.client.models.generate_content(
                 model=self.model_id,
                 contents=prompt
             )
-            
-            if response and response.text:
-                return True, response.text
-            else:
-                return False, "模型未回傳任何內容。"
-                
+            return True, response.text
         except Exception as e:
-            logging.error(f"[GeminiClient] 推理失敗: {e}")
-            return False, f"Gemini API 錯誤: {str(e)}"
+            return False, str(e)
 
 gemini_client = GeminiClient()
