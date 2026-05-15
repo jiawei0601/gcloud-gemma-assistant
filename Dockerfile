@@ -1,26 +1,21 @@
 FROM python:3.11-slim
 
-# 設定環境變數
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
-ENV PATH="/home/appuser/.local/bin:$PATH"
-
 WORKDIR /app
 
-# 建立非 root 使用者
-RUN useradd -m appuser && chown -R appuser /app
-USER appuser
-
-# 安裝相依套件 (直接安裝到使用者目錄)
-COPY --chown=appuser:appuser requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+# 安裝基礎依賴
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 複製程式碼
-COPY --chown=appuser:appuser . .
+COPY . .
 
-# 暴露埠號
+# 設定環境變數預設值
+ENV PORT=8080
+ENV PYTHONUNBUFFERED=1
+
+# 曝露埠號
 EXPOSE 8080
 
-# 執行入口
-CMD ["python", "main.py"]
+# 使用 gunicorn 啟動 Flask 應用 (推薦用於 Cloud Run 生產環境)
+# 如果您更偏好單純 python bot.py 也可以，但 gunicorn 穩定性更高
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 bot:app

@@ -1,9 +1,10 @@
 pydantic>=2.0.0
 google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-httpx
+google-auth
+google-genai
+flask
+gunicorn
 python-dotenv
 python-telegram-bot
 beautifulsoup4
-google-auth
+httpx
