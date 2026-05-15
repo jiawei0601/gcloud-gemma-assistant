@@ -3,7 +3,6 @@ import asyncio
 import sys
 from flask import Flask, request
 from telegram import Update, Bot
-from telegram.ext import Application
 
 from config import config
 from src.clients.gemini_client import gemini_client
@@ -22,45 +21,40 @@ logger = logging.getLogger("BotEntry")
 
 app = Flask(__name__)
 
-# 全域狀態
-application = None
-handlers = None
-
-async def setup_application():
-    """初始化 Telegram Application (異步)"""
-    global application, handlers
-    if application is None:
-        logger.info("[Init] 正在初始化研究助理系統...")
-        application = Application.builder().token(config.TELEGRAM_TOKEN).build()
-        handlers = TelegramCommandHandler(gemini_client)
-        
-        from telegram.ext import CommandHandler, MessageHandler, filters
-        application.add_handler(CommandHandler("start", handlers.handle_start))
-        application.add_handler(CommandHandler("research", handlers.handle_research))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
-        application.add_handler(MessageHandler(filters.COMMAND, handlers.handle_message))
-        
-        await application.initialize()
-        await application.start()
-        
-        if config.WEBHOOK_URL:
-            webhook_full_url = f"{config.WEBHOOK_URL}/telegram"
-            await application.bot.set_webhook(url=webhook_full_url, drop_pending_updates=True)
-            logger.info(f"[Init] Webhook 已註冊: {webhook_full_url}")
-
-async def process_update(data):
-    """核心處理流程 (與參考專案一致)"""
-    await setup_application()
-    update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+async def handle_update(data):
+    """
+    採用與參考專案一致的「無狀態」處理邏輯：
+    1. 每個請求建立獨立 Bot 物件
+    2. 直接解析 Update
+    3. 直接調用 Handlers
+    """
+    bot = Bot(token=config.TELEGRAM_TOKEN)
+    update = Update.de_json(data, bot)
+    
+    # 初始化處理器
+    handlers = TelegramCommandHandler(gemini_client)
+    
+    # 判斷訊息類型並路由 (模仿 Application 的行為)
+    if update.message and update.message.text:
+        text = update.message.text
+        if text.startswith('/start'):
+            await handlers.handle_start(update, None)
+        elif text.startswith('/research'):
+            # 簡單解析指令參數
+            parts = text.split(None, 1)
+            class MockContext:
+                def __init__(self, args): self.args = args
+            context = MockContext(parts[1].split() if len(parts) > 1 else [])
+            await handlers.handle_research(update, context)
+        else:
+            await handlers.handle_message(update, None)
 
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
-    """處理來自 Telegram 的 Webhook 請求"""
     try:
         data = request.get_json(force=True)
-        # 採用參考專案的穩定模式：直接啟動 asyncio.run
-        asyncio.run(process_update(data))
+        # 使用 asyncio.run() 確保每個請求都有獨立且乾淨的 loop
+        asyncio.run(handle_update(data))
         return 'ok', 200
     except Exception as e:
         logger.error(f"[Webhook] 處理失敗: {e}", exc_info=True)
@@ -68,8 +62,7 @@ def telegram_webhook():
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return 'Research Assistant is active', 200
+    return 'Gemma Assistant (Stabilized) is active', 200
 
 if __name__ == '__main__':
-    logger.info(f"🚀 啟動研究助理服務，Port: {config.PORT}")
     app.run(host='0.0.0.0', port=config.PORT)
