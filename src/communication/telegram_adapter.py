@@ -1,55 +1,59 @@
 import logging
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from src.communication.handlers import TelegramCommandHandler
+import asyncio
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from src.core.orchestrator import Orchestrator
+from src.communication.handlers import CommandHandlers
 
 logger = logging.getLogger(__name__)
 
 class TelegramAdapter:
-    """Telegram 通訊適配器，負責 Bot 的生命週期與路由"""
-    
-    def __init__(self, bot_token: str, orchestrator: Orchestrator):
-        self.bot_token = bot_token
+    def __init__(self, token: str, orchestrator: Orchestrator):
+        self.application = Application.builder().token(token).build()
         self.orchestrator = orchestrator
-        self.handler_logic = TelegramCommandHandler(orchestrator)
-        self.application = None
+        self.handlers = CommandHandlers(orchestrator)
+        self._setup_handlers()
+
+    def _setup_handlers(self):
+        self.application.add_handler(CommandHandler("start", self.handlers.start))
+        self.application.add_handler(CommandHandler("research", self.handlers.research))
+        self.application.add_handler(CommandHandler("status", self.handlers.status))
+        self.application.add_handler(MessageHandler(filters.COMMAND, self.handlers.unknown_command))
+        # 捕捉所有非指令訊息，提供正確引導
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handlers.handle_message))
 
     async def initialize(self):
-        """初始化 Telegram Application 並註冊處理器"""
-        self.application = ApplicationBuilder().token(self.bot_token).build()
-        
-        # 顯式初始化 (PTB 20.x 必需)
+        """初始化 Application 物件"""
         await self.application.initialize()
-        
-        # 註冊指令
-        self.application.add_handler(CommandHandler("start", self.handler_logic.handle_start))
-        self.application.add_handler(CommandHandler("research", self.handler_logic.handle_research))
-        
-        # 註冊一般訊息處理 (用於提示用戶)
-        self.application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handler_logic.handle_message))
-        # 註冊未知指令處理
-        self.application.add_handler(MessageHandler(filters.COMMAND, self.handler_logic.handle_message))
-        
-        logger.info("Telegram Adapter 已完成初始化並註冊處理器。")
 
-    async def run(self):
-        """啟動 Bot"""
-        if not self.application:
-            await self.initialize()
-            
-        logger.info("Telegram Bot 正在啟動輪詢...")
-        await self.application.run_polling()
-
-    async def send_startup_notification(self, chat_id: str):
-        """啟動時發送通知給管理員"""
-        if not self.application:
-            await self.initialize()
-            
+    async def send_startup_notification(self, admin_id: str):
+        """發送啟動通知給管理員"""
         try:
+            from src.intelligence.factory import IntelligenceFactory
+            provider = IntelligenceFactory.create_provider()
+            # 這裡我們手動判斷模型名稱，因為 Provider 現在是動態的
+            model_info = "Gemini 3.1 Pro"
+            
             await self.application.bot.send_message(
-                chat_id=chat_id,
-                text="🚀 **Gemma AI Research Assistant 已成功部屬並啟動！**\n\n目前正在 Google Cloud Run 上運行，隨時準備為您服務。"
+                chat_id=admin_id,
+                text=f"🤖 **Gemma 4 研究助理已上線 (Webhook 模式)**\n\n當前引擎：`{model_info}`\n機房位置：`Cloud Run (asia-east1)`\n狀態：已準備好執行任務。"
             )
-            logger.info(f"已發送啟動通知給管理員: {chat_id}")
         except Exception as e:
             logger.error(f"發送啟動通知失敗: {e}")
+
+    async def run_webhook(self, url: str, port: int):
+        """以 Webhook 模式執行"""
+        logger.info(f"🌐 [WEBHOOK] 設定網鉤至: {url}")
+        
+        # 建立更新隊列與應用程式啟動
+        await self.application.start()
+        await self.application.bot.set_webhook(url=f"{url}/telegram", drop_pending_updates=True)
+        
+        # 這裡不使用 application.run_webhook，因為我們已經有自己的 HTTP Server (main.py)
+        # 我們只需要讓 application 處於 start 狀態即可，由 main.py 將 update 餵進來
+        logger.info("✅ [WEBHOOK] 應用程式已進入監聽狀態。")
+
+    async def process_update(self, update_json: dict):
+        """處理來自 Webhook 的更新"""
+        update = Update.de_json(data=update_json, bot=self.application.bot)
+        await self.application.process_update(update)

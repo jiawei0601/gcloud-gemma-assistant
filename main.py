@@ -4,6 +4,7 @@ import os
 import http.server
 import threading
 import sys
+import json
 from dotenv import load_dotenv
 
 # 強制刷新 stdout
@@ -17,76 +18,89 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     stream=sys.stdout
 )
-logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger("Main")
 
-class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
+# 全域變數供 Webhook 使用
+tg_adapter = None
+
+class WebhookHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        # 健康檢查路徑
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
+
+    def do_POST(self):
+        # Telegram Webhook 進入點
+        if self.path == "/telegram":
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            update_json = json.loads(post_data.decode('utf-8'))
+            
+            # 非同步處理更新
+            if tg_adapter:
+                asyncio.run_coroutine_threadsafe(
+                    tg_adapter.process_update(update_json), 
+                    main_loop
+                )
+            
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"OK")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def log_message(self, format, *args): return
 
-def run_health_check_server():
+def run_http_server():
     port = int(os.getenv("PORT", "8080"))
     server_address = ('0.0.0.0', port)
-    httpd = http.server.HTTPServer(server_address, HealthCheckHandler)
-    logger.info(f"✅ [HEALTH] 伺服器啟動於 0.0.0.0:{port}")
+    httpd = http.server.HTTPServer(server_address, WebhookHandler)
+    logger.info(f"✅ [SYSTEM] Webhook 伺服器啟動於 0.0.0.0:{port}")
     httpd.serve_forever()
 
 async def start_bot():
-    logger.info("🎬 [SYSTEM] 啟動初始化流程...")
+    global tg_adapter, main_loop
+    main_loop = asyncio.get_running_loop()
+    
+    logger.info("🎬 [SYSTEM] 啟動初始化流程 (Webhook 模式)...")
     
     try:
-        # 分步載入模組，以便追蹤進度
-        logger.info("📦 [LOAD] 正在載入核心協調器...")
         from src.core.orchestrator import Orchestrator
-        
-        logger.info("📦 [LOAD] 正在載入智慧引擎...")
         from src.intelligence.factory import IntelligenceFactory
-        
-        logger.info("📦 [LOAD] 正在載入 Telegram 轉接器...")
         from src.communication.telegram_adapter import TelegramAdapter
         
-        logger.info("⚙️ [INIT] 正在初始化服務組件...")
         intelligence_svc = IntelligenceFactory.create_provider()
         orchestrator = Orchestrator(intelligence_provider=intelligence_svc)
         
         bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         admin_id = os.getenv("ADMIN_CHAT_ID")
+        # Cloud Run 的外部 URL，由環境變數提供
+        webhook_url = os.getenv("WEBHOOK_URL", f"https://gemma-assistant-927751279284.asia-east1.run.app")
         
         if not bot_token:
             logger.error("❌ [BOT] TELEGRAM_BOT_TOKEN 缺失！")
             return
 
-        logger.info(f"🤖 [BOT] 正在建立連線...")
         tg_adapter = TelegramAdapter(bot_token, orchestrator)
-        
-        # 初始化與身份驗證
         await tg_adapter.initialize()
-        me = await tg_adapter.application.bot.get_me()
-        logger.info(f"✅ [BOT] 驗證成功: @{me.username}")
         
-        # 啟動背景健康檢查伺服器 (僅在 Bot 驗證成功後)
-        logger.info("📡 [SYSTEM] 啟動健康檢查伺服器...")
-        threading.Thread(target=run_health_check_server, daemon=True).start()
+        # 啟動 Webhook 模式
+        await tg_adapter.run_webhook(webhook_url, int(os.getenv("PORT", "8080")))
+        
+        # 啟動 HTTP Server (處理健康檢查與 Webhook)
+        threading.Thread(target=run_http_server, daemon=True).start()
         
         if admin_id:
-            logger.info(f"🔔 [BOT] 發送啟動通知...")
             await tg_adapter.send_startup_notification(admin_id)
             
-        logger.info("💎 [SYSTEM] 系統已全面就緒，開始輪詢監聽。")
-        async with tg_adapter.application:
-            await tg_adapter.application.start()
-            await tg_adapter.application.updater.start_polling()
-            while True:
-                await asyncio.sleep(3600)
+        logger.info("💎 [SYSTEM] Webhook 模式已就緒。")
+        while True:
+            await asyncio.sleep(3600)
                 
     except Exception as e:
         logger.critical(f"💥 [FATAL] 啟動失敗: {e}", exc_info=True)
-        # 在失敗時也要開啟埠口，否則 Cloud Run 會一直無限重啟而看不到完整日誌
-        threading.Thread(target=run_health_check_server, daemon=True).start()
-        await asyncio.sleep(300)
         sys.exit(1)
 
 if __name__ == "__main__":
