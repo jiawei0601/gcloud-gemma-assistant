@@ -9,7 +9,7 @@ class GeminiClient:
     def __init__(self):
         self.project_id = config.PROJECT_ID
         self.location = config.LOCATION
-        self.model_id = "gemini-2.0-flash" # 使用具備強大搜尋與並行能力的 flash 版本，或依需求調整
+        self.model_id = "gemini-1.5-flash" # 切換為穩定版本以解決 404 錯誤
         
         try:
             self.client = genai.Client(
