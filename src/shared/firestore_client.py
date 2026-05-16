@@ -17,22 +17,34 @@ class FirestoreClient:
     async def try_lock(self, update_id: str) -> bool:
         """
         嘗試鎖定 update_id 以進行去重。
-        使用 .create() 原子操作。
+        支援重試：如果狀態不是 'completed'，則允許再次嘗試。
         """
         doc_ref = self.db.collection(self.collection_name).document(str(update_id))
         try:
-            # 原子化建立文件
-            await doc_ref.create({
-                "status": "processing",
-                "timestamp": datetime.now(timezone.utc)
-            })
-            return True
+            doc = await doc_ref.get()
+            if doc.exists:
+                data = doc.to_dict()
+                if data.get("status") == "completed":
+                    logger.info(f"⏭️ Update {update_id} already completed. Skipping.")
+                    return False
+                else:
+                    logger.warning(f"🔄 Update {update_id} was in state '{data.get('status')}', allowing retry.")
+                    await doc_ref.update({
+                        "status": "processing",
+                        "retry_timestamp": datetime.now(timezone.utc)
+                    })
+                    return True
+            else:
+                # 原子化建立文件
+                await doc_ref.create({
+                    "status": "processing",
+                    "timestamp": datetime.now(timezone.utc)
+                })
+                return True
         except exceptions.AlreadyExists:
-            # 已經存在，代表是重複請求
             return False
         except Exception as e:
             logger.error(f"Firestore Error in try_lock: {e}")
-            # 如果是權限錯誤 (403)，則這裡會報錯
             raise e
 
     async def save_user_chat(self, chat_id: str):

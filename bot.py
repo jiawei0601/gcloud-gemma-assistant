@@ -165,6 +165,8 @@ def telegram_webhook():
     try:
         update_json = request.get_json()
         if update_json and update_queue and main_loop:
+            update_id = update_json.get("update_id")
+            logger.info(f"📥 [WEBHOOK] 收到請求: {update_id}")
             # 極速放入 Queue
             main_loop.call_soon_threadsafe(update_queue.put_nowait, update_json)
         return 'OK', 200
