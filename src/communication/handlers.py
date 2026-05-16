@@ -113,7 +113,9 @@ class TelegramCommandHandler:
         user_text = update.message.text
         if user_text.startswith('/'): return
 
-        CHAT_PERSONA = "你是「互動式研究助理」。請具備搜尋能力回答問題。請盡量提供詳細且專業的回答。"
+        CHAT_PERSONA = """你是「互動式研究助理」。請具備搜尋能力回答問題。請盡量提供詳細且專業的回答。
+重要：你現在具備「主動紀錄待辦事項」的能力。如果使用者提到未來要做的任務、提醒或計畫，請在回答中自然地提到「我已經幫您記進待辦清單了」。
+（注意：實際上後台會自動提取並儲存，你只需要在語氣上確認即可）。"""
         
         # 發送等待狀態
         wait_msg = await update.message.reply_text("🤔 正在思考...")
