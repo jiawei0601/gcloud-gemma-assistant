@@ -77,7 +77,7 @@ def initialize_components():
     firestore_client = FirestoreClient(project_id=config.PROJECT_ID)
     
     # 2. 初始化 Telegram Adapter
-    tg_adapter = TelegramAdapter(config.TELEGRAM_TOKEN, gemini_client)
+    tg_adapter = TelegramAdapter(config.TELEGRAM_TOKEN, gemini_client, firestore_client)
     
     # 3. 建立 Async Loop
     main_loop = asyncio.new_event_loop()
@@ -113,6 +113,28 @@ def initialize_components():
     
     logger.info("💎 [SYSTEM] 組件初始化完成。")
 
+# 提醒邏輯
+async def send_reminder_to_all():
+    """
+    發送提醒給所有活躍使用者。
+    """
+    if not tg_adapter or not firestore_client:
+        return
+    
+    users = await firestore_client.get_all_active_users()
+    for chat_id in users:
+        todos = await firestore_client.get_pending_todos(chat_id)
+        if todos:
+            text = "⏰ **定期待辦事項提醒**\n\n您還有以下未完成事項：\n"
+            for i, todo in enumerate(todos, 1):
+                text += f"{i}. {todo['task']}\n"
+            
+            try:
+                await tg_adapter.application.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')
+                logger.info(f"Sent reminder to {chat_id}")
+            except Exception as e:
+                logger.error(f"Failed to send reminder to {chat_id}: {e}")
+
 # 首次請求時初始化 (或者在模組層級，視部署環境而定)
 with app.app_context():
     initialize_components()
@@ -131,6 +153,16 @@ def telegram_webhook():
     except Exception as e:
         logger.error(f"Webhook Route Error: {e}")
         return 'Error', 500
+
+@app.route('/remind', methods=['GET'])
+def trigger_reminder():
+    """
+    由 Google Cloud Scheduler 觸發的提醒路徑。
+    """
+    if main_loop:
+        asyncio.run_coroutine_threadsafe(send_reminder_to_all(), main_loop)
+        return 'Reminder triggered', 200
+    return 'Loop not initialized', 500
 
 @app.route('/', methods=['GET'])
 def health_check():

@@ -10,10 +10,15 @@ PROMPT_DATA_COLLECTOR = "你是「數據與事實搜集員」。你的任務是�
 PROMPT_CONTEXT_ANALYST = "你是「背景與脈絡分析師」。你的任務是分析主題的歷史背景、現狀以及相關的產業脈絡。"
 PROMPT_IMPACT_ASSESSOR = "你是「趨勢與影響評估師」。你的任務是根據現有資訊預測未來的可能發展方向與潛在影響。"
 PROMPT_CHIEF_EDITOR = "你是「首席研究總監」。你的任務是將各專家的分析結果整合成一份結構完整、專業且具備深度見解的最終報告。請使用 Markdown 格式。"
+PROMPT_TASK_EXTRACTOR = """你是一個任務管理助理。請分析使用者的對話內容，判斷其中是否包含「未完成事項」、「待辦任務」或「未來要做的事情」。
+如果包含，請將其提取為簡短的任務清單。
+格式要求：每個任務一行，僅輸出任務內容。
+如果沒有包含任何任務，請回覆「NONE」。"""
 
 class TelegramCommandHandler:
-    def __init__(self, gemini_client):
+    def __init__(self, gemini_client, firestore_client):
         self.gemini = gemini_client
+        self.firestore = firestore_client
         # 限制同時運行的 Agent 數量，避免 API 速率限制
         self.semaphore = asyncio.Semaphore(5)
 
@@ -37,7 +42,9 @@ class TelegramCommandHandler:
                 logger.error(f"發送訊息失敗: {e}")
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        welcome_text = "🚀 **專業研究助理 (Multi-Agent) 已啟動**\n\n可用指令：\n- `/research <主題>`：啟動深度專案研究\n- 直接輸入問題：啟動快速互動查詢"
+        chat_id = update.effective_chat.id
+        await self.firestore.save_user_chat(chat_id)
+        welcome_text = "🚀 **專業研究助理 (Multi-Agent) 已啟動**\n\n可用指令：\n- `/research <主題>`：啟動深度專案研究\n- `/todos`：查看待辦事項\n- 直接輸入問題：啟動快速互動查詢"
         await self._safe_send_or_edit(update.message, welcome_text)
 
     async def _run_agent_task(self, persona: str, topic: str, use_search: bool = True):
@@ -46,6 +53,8 @@ class TelegramCommandHandler:
             return await asyncio.to_thread(self.gemini.ask_expert_sync, persona, topic, use_search=use_search)
 
     async def handle_research(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        chat_id = update.effective_chat.id
+        await self.firestore.save_user_chat(chat_id)
         if not context.args:
             await update.message.reply_text("請提供研究主題。範例：`/research 低空經濟發展`")
             return
@@ -98,6 +107,9 @@ class TelegramCommandHandler:
         if not update.message or not update.message.text:
             return
 
+        chat_id = update.effective_chat.id
+        await self.firestore.save_user_chat(chat_id)
+        
         user_text = update.message.text
         if user_text.startswith('/'): return
 
@@ -107,10 +119,42 @@ class TelegramCommandHandler:
         wait_msg = await update.message.reply_text("🤔 正在思考...")
         
         try:
+            # 1. 正常回覆
             res = await self._run_agent_task(CHAT_PERSONA, user_text, use_search=True)
             if res.get("success"):
                 await self._safe_send_or_edit(wait_msg, res['text'])
             else:
-                await self._safe_send_or_edit(wait_msg, f"⚠️ 抱錯：{res.get('text')}")
+                await self._safe_send_or_edit(wait_msg, f"⚠️ 報錯：{res.get('text')}")
+            
+            # 2. 背景任務：分析並提取待辦事項
+            asyncio.create_task(self._extract_and_save_todo(chat_id, user_text))
+            
         except Exception as e:
             await self._safe_send_or_edit(wait_msg, f"❌ 查詢失敗：{e}")
+
+    async def _extract_and_save_todo(self, chat_id, text):
+        """背景提取任務並儲存"""
+        try:
+            res = await self._run_agent_task(PROMPT_TASK_EXTRACTOR, f"對話內容：{text}", use_search=False)
+            if res.get("success") and res['text'].strip() != "NONE":
+                tasks = res['text'].strip().split('\n')
+                for task in tasks:
+                    if task.strip():
+                        await self.firestore.add_todo(chat_id, task.strip())
+        except Exception as e:
+            logger.error(f"提取待辦事項失敗: {e}")
+
+    async def handle_list_todos(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        chat_id = update.effective_chat.id
+        await self.firestore.save_user_chat(chat_id)
+        
+        todos = await self.firestore.get_pending_todos(chat_id)
+        if not todos:
+            await update.message.reply_text("🎉 目前沒有未完成的待辦事項！")
+            return
+
+        text = "📝 **您的未完成事項清單：**\n\n"
+        for i, todo in enumerate(todos, 1):
+            text += f"{i}. {todo['task']}\n"
+        
+        await update.message.reply_text(text, parse_mode='Markdown')

@@ -2,21 +2,22 @@ import logging
 import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from src.core.orchestrator import Orchestrator
 from src.communication.handlers import TelegramCommandHandler
 
 logger = logging.getLogger(__name__)
 
 class TelegramAdapter:
-    def __init__(self, token: str, client: any):
+    def __init__(self, token: str, client: any, firestore_client: any):
         self.application = Application.builder().token(token).build()
         self.client = client
-        self.handlers = TelegramCommandHandler(client)
+        self.firestore = firestore_client
+        self.handlers = TelegramCommandHandler(client, firestore_client)
         self._setup_handlers()
 
     def _setup_handlers(self):
         self.application.add_handler(CommandHandler("start", self.handlers.handle_start))
         self.application.add_handler(CommandHandler("research", self.handlers.handle_research))
+        self.application.add_handler(CommandHandler("todos", self.handlers.handle_list_todos))
         self.application.add_handler(CommandHandler("status", self.handlers.handle_start)) # 暫時映射到 start
         # 捕捉所有非指令訊息與未知指令
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handlers.handle_message))
