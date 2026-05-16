@@ -95,7 +95,8 @@ class FirestoreClient:
         """
         todos_ref = self.db.collection("todos")
         query = todos_ref.where("chat_id", "==", str(chat_id)).where("status", "==", "pending")
-        docs = await query.stream()
+        # stream() 不需要 await，它回傳的是 AsyncStreamGenerator
+        docs = query.stream()
         return [{"id": d.id, **d.to_dict()} async for d in docs]
 
     async def get_all_active_users(self):
@@ -103,7 +104,8 @@ class FirestoreClient:
         獲取所有活躍使用者的 Chat ID。
         """
         users_ref = self.db.collection("users")
-        docs = await users_ref.stream()
+        # stream() 不需要 await
+        docs = users_ref.stream()
         return [d.to_dict().get("chat_id") async for d in docs]
 
     async def mark_completed(self, update_id: str):
