@@ -28,12 +28,17 @@ tg_adapter = None
 firestore_client = None
 update_queue = None
 main_loop = None
+initialization_event = None
 
 async def update_worker(queue, adapter, firestore):
     """
     背景工作者：從 Queue 取出更新並處理。
     """
-    logger.info("👷 [Worker] 背景工作者啟動。")
+    # 等待初始化完成
+    logger.info("👷 [Worker] 等待組件初始化完成...")
+    await initialization_event.wait()
+    logger.info("👷 [Worker] 背景工作者正式啟動。")
+    
     while True:
         update_json = await queue.get()
         update_id = update_json.get("update_id")
@@ -66,7 +71,7 @@ async def update_worker(queue, adapter, firestore):
 
 # 初始化組件
 def initialize_components():
-    global tg_adapter, firestore_client, update_queue, main_loop
+    global tg_adapter, firestore_client, update_queue, main_loop, initialization_event
     
     from src.clients.gemini_client import gemini_client
     from src.communication.telegram_adapter import TelegramAdapter
@@ -85,11 +90,29 @@ def initialize_components():
     # 4. 啟動背景線程
     def run_loop():
         asyncio.set_event_loop(main_loop)
-        # 在 loop 內建立 Queue
-        global update_queue
-        update_queue = asyncio.Queue()
         
+        global update_queue, initialization_event
+        update_queue = asyncio.Queue()
+        initialization_event = asyncio.Event()
+        
+        # 啟動 Worker
         main_loop.create_task(update_worker(update_queue, tg_adapter, firestore_client))
+        
+        # 執行初始化序列
+        async def startup_sequence():
+            try:
+                logger.info("🎬 [SYSTEM] 開始執行初始化序列...")
+                await tg_adapter.initialize()
+                
+                if config.WEBHOOK_URL:
+                    await tg_adapter.run_webhook(config.WEBHOOK_URL, config.PORT)
+                
+                initialization_event.set()
+                logger.info("💎 [SYSTEM] 初始化序列完成，Event 已設置。")
+            except Exception as e:
+                logger.critical(f"💥 [SYSTEM] 初始化失敗: {e}", exc_info=True)
+
+        main_loop.create_task(startup_sequence())
         main_loop.run_forever()
 
     t = threading.Thread(target=run_loop, daemon=True)
@@ -100,18 +123,8 @@ def initialize_components():
     for _ in range(10):
         if update_queue is not None: break
         time.sleep(0.1)
-
-    # 5. 初始化 Telegram (異步)
-    asyncio.run_coroutine_threadsafe(tg_adapter.initialize(), main_loop)
     
-    # 6. 設定 Webhook (異步)
-    if config.WEBHOOK_URL:
-        asyncio.run_coroutine_threadsafe(
-            tg_adapter.run_webhook(config.WEBHOOK_URL, config.PORT), 
-            main_loop
-        )
-    
-    logger.info("💎 [SYSTEM] 組件初始化完成。")
+    logger.info("🚀 [SYSTEM] 背景執行緒已啟動。")
 
 # 提醒邏輯
 async def send_reminder_to_all():
@@ -121,6 +134,11 @@ async def send_reminder_to_all():
     if not tg_adapter or not firestore_client:
         return
     
+    # 確保發送前已初始化
+    if initialization_event and not initialization_event.is_set():
+        logger.warning("Reminder triggered but system not initialized yet.")
+        return
+
     users = await firestore_client.get_all_active_users()
     for chat_id in users:
         todos = await firestore_client.get_pending_todos(chat_id)
@@ -135,7 +153,7 @@ async def send_reminder_to_all():
             except Exception as e:
                 logger.error(f"Failed to send reminder to {chat_id}: {e}")
 
-# 首次請求時初始化 (或者在模組層級，視部署環境而定)
+# 首次請求時初始化
 with app.app_context():
     initialize_components()
 
