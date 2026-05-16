@@ -44,8 +44,39 @@ class TelegramCommandHandler:
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.effective_chat.id
         await self.firestore.save_user_chat(chat_id)
-        welcome_text = "🚀 **專業研究助理 (Multi-Agent) 已啟動**\n\n可用指令：\n- `/research <主題>`：啟動深度專案研究\n- `/todos`：查看待辦事項\n- 直接輸入問題：啟動快速互動查詢"
+        welcome_text = "🚀 **專業研究助理 (Multi-Agent) 已啟動**\n\n可用指令：\n- `/research <主題>`：啟動深度專案研究\n- `/todos`：查看待辦事項\n- `/health`：系統狀態檢查\n- 直接輸入問題：啟動快速互動查詢"
         await self._safe_send_or_edit(update.message, welcome_text)
+
+    async def handle_health(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """檢查系統健康狀態"""
+        from config import config
+        import time
+        
+        status_text = "🏥 **系統健康診斷報告**\n\n"
+        
+        # 1. 檢查 Gemini
+        try:
+            start_time = time.time()
+            res = await self._run_agent_task("你是健康檢查員。請回覆『PONG』。", "PING", use_search=False)
+            latency = time.time() - start_time
+            if res.get("success"):
+                status_text += f"✅ **AI 引擎 (Gemini)**: 在線 (延遲: {latency:.2f}s)\n"
+            else:
+                status_text += f"❌ **AI 引擎 (Gemini)**: 錯誤 ({res.get('text')})\n"
+        except:
+            status_text += "❌ **AI 引擎 (Gemini)**: 離線\n"
+            
+        # 2. 檢查 Firestore
+        try:
+            users = await self.firestore.get_all_active_users()
+            status_text += f"✅ **資料庫 (Firestore)**: 在線 (用戶數: {len(users)})\n"
+        except:
+            status_text += "❌ **資料庫 (Firestore)**: 錯誤\n"
+            
+        # 3. 系統資訊
+        status_text += f"\n⚙️ **環境資訊**:\n- 引擎: `{config.GEMINI_MODEL_ID}`\n- 地區: `{config.LOCATION}`\n- 版本: `Matt's Skills V2 (Transactional)`"
+        
+        await update.message.reply_text(status_text, parse_mode='Markdown')
 
     async def _run_agent_task(self, persona: str, topic: str, use_search: bool = True):
         """運行單個 Agent 任務的包裝器"""

@@ -19,7 +19,8 @@ class TelegramAdapter:
         self.application.add_handler(CommandHandler("research", self.handlers.handle_research))
         self.application.add_handler(CommandHandler("todos", self.handlers.handle_list_todos))
         self.application.add_handler(CommandHandler("remind", self.handlers.handle_list_todos)) # 別名
-        self.application.add_handler(CommandHandler("status", self.handlers.handle_start)) # 暫時映射到 start
+        self.application.add_handler(CommandHandler("health", self.handlers.handle_health))
+        self.application.add_handler(CommandHandler("status", self.handlers.handle_health)) # 映射到 health
         # 捕捉所有非指令訊息與未知指令
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handlers.handle_message))
         self.application.add_handler(MessageHandler(filters.COMMAND, self.handlers.handle_message))

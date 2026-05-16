@@ -14,38 +14,57 @@ class FirestoreClient:
         self.collection_name = collection_name
         logger.info(f"Initialized FirestoreClient for project {project_id}, database tgcost, collection {collection_name}")
 
-    async def try_lock(self, update_id: str) -> bool:
+    async def try_lock(self, update_id: str, ttl_seconds: int = 600) -> bool:
         """
-        嘗試鎖定 update_id 以進行去重。
-        支援重試：如果狀態不是 'completed'，則允許再次嘗試。
+        [Deep Module] 嘗試獲取執行鎖。
+        使用 Firestore Transaction 確保原子性，並包含超時重試機制。
         """
+        transaction = self.db.transaction()
         doc_ref = self.db.collection(self.collection_name).document(str(update_id))
-        try:
-            doc = await doc_ref.get()
-            if doc.exists:
-                data = doc.to_dict()
-                if data.get("status") == "completed":
-                    logger.info(f"⏭️ Update {update_id} already completed. Skipping.")
+
+        @firestore.async_transactional
+        async def _acquire_in_transaction(transaction, doc_ref):
+            snapshot = await doc_ref.get(transaction=transaction)
+            now = datetime.now(timezone.utc)
+            
+            if snapshot.exists:
+                data = snapshot.to_dict()
+                status = data.get("status")
+                timestamp = data.get("timestamp")
+                
+                # 如果已完成，絕對不再執行
+                if status == "completed":
                     return False
-                else:
-                    logger.warning(f"🔄 Update {update_id} was in state '{data.get('status')}', allowing retry.")
-                    await doc_ref.update({
-                        "status": "processing",
-                        "retry_timestamp": datetime.now(timezone.utc)
-                    })
-                    return True
-            else:
-                # 原子化建立文件
-                await doc_ref.create({
+                
+                # 如果正在處理中，檢查是否超時 (TTL)
+                if status == "processing":
+                    if timestamp and (now - timestamp).total_seconds() < ttl_seconds:
+                        # 尚未超時，鎖定依然有效
+                        return False
+                    else:
+                        logger.warning(f"🔓 Lock timeout for {update_id}, reclaiming.")
+                
+                # 其他狀態 (failed, timeout) 則允許重新鎖定
+                transaction.update(doc_ref, {
                     "status": "processing",
-                    "timestamp": datetime.now(timezone.utc)
+                    "timestamp": now,
+                    "retry_count": data.get("retry_count", 0) + 1
                 })
                 return True
-        except exceptions.AlreadyExists:
-            return False
+            else:
+                # 第一次嘗試
+                transaction.set(doc_ref, {
+                    "status": "processing",
+                    "timestamp": now,
+                    "retry_count": 0
+                })
+                return True
+
+        try:
+            return await _acquire_in_transaction(transaction, doc_ref)
         except Exception as e:
-            logger.error(f"Firestore Error in try_lock: {e}")
-            raise e
+            logger.error(f"Transaction Error in try_lock: {e}")
+            return False
 
     async def save_user_chat(self, chat_id: str):
         """
