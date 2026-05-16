@@ -165,6 +165,11 @@ class TelegramCommandHandler:
         except Exception as e:
             await self._safe_send_or_edit(wait_msg, f"❌ 查詢失敗：{e}")
 
+    async def handle_hide_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """強制移除回覆按鈕選單"""
+        from telegram import ReplyKeyboardRemove
+        await update.message.reply_text("已嘗試關閉按鈕選單。", reply_markup=ReplyKeyboardRemove())
+
     async def _extract_and_save_todo(self, chat_id, text):
         """背景提取任務並儲存"""
         try:
