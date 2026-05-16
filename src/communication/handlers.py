@@ -70,8 +70,9 @@ class TelegramCommandHandler:
         try:
             users = await self.firestore.get_all_active_users()
             status_text += f"✅ **資料庫 (Firestore)**: 在線 (用戶數: {len(users)})\n"
-        except:
-            status_text += "❌ **資料庫 (Firestore)**: 錯誤\n"
+        except Exception as e:
+            logger.error(f"Health Check Firestore Error: {e}")
+            status_text += f"❌ **資料庫 (Firestore)**: 錯誤 ({str(e)[:50]})\n"
             
         # 3. 系統資訊
         status_text += f"\n⚙️ **環境資訊**:\n- 引擎: `{config.GEMINI_MODEL_ID}`\n- 地區: `{config.LOCATION}`\n- 版本: `Matt's Skills V2 (Transactional)`"
