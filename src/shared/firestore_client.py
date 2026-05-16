@@ -68,13 +68,32 @@ class FirestoreClient:
 
     async def save_user_chat(self, chat_id: str):
         """
-        記錄使用者的 Chat ID，用於定時提醒。
+        記錄使用者的 Chat ID 並初始化預設提醒時間。
         """
         doc_ref = self.db.collection("users").document(str(chat_id))
         await doc_ref.set({
             "chat_id": str(chat_id),
-            "last_active": datetime.now(timezone.utc)
+            "last_active": datetime.now(timezone.utc),
+            "reminder_times": ["08:00", "13:30"] # 預設時間
         }, merge=True)
+
+    async def set_user_reminder_times(self, chat_id: str, times: list):
+        """
+        更新使用者的提醒時間設定。
+        """
+        doc_ref = self.db.collection("users").document(str(chat_id))
+        await doc_ref.update({
+            "reminder_times": times
+        })
+        logger.info(f"Updated reminder times for {chat_id}: {times}")
+
+    async def get_user_settings(self, chat_id: str):
+        """
+        獲取使用者的設定。
+        """
+        doc_ref = self.db.collection("users").document(str(chat_id))
+        doc = await doc_ref.get()
+        return doc.to_dict() if doc.exists else None
 
     async def add_todo(self, chat_id: str, task_text: str):
         """
@@ -101,12 +120,12 @@ class FirestoreClient:
 
     async def get_all_active_users(self):
         """
-        獲取所有活躍使用者的 Chat ID。
+        獲取所有活躍使用者及其設定。
         """
         users_ref = self.db.collection("users")
         # stream() 不需要 await
         docs = users_ref.stream()
-        return [d.to_dict().get("chat_id") async for d in docs]
+        return [d.to_dict() async for d in docs]
 
     async def mark_completed(self, update_id: str):
         """

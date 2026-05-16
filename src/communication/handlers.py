@@ -44,8 +44,34 @@ class TelegramCommandHandler:
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.effective_chat.id
         await self.firestore.save_user_chat(chat_id)
-        welcome_text = "🚀 **專業研究助理 (Multi-Agent) 已啟動**\n\n可用指令：\n- `/research <主題>`：啟動深度專案研究\n- `/todos`：查看待辦事項\n- `/health`：系統狀態檢查\n- 直接輸入問題：啟動快速互動查詢"
+        welcome_text = "🚀 **專業研究助理 (Multi-Agent) 已啟動**\n\n可用指令：\n- `/research <主題>`：啟動深度專案研究\n- `/todos`：查看待辦事項\n- `/settime <時間>`：設定提醒時間 (範例：`/settime 08:00, 13:30`)\n- `/health`：系統狀態檢查\n- 直接輸入問題：啟動快速互動查詢"
         await self._safe_send_or_edit(update.message, welcome_text)
+
+    async def handle_set_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """設定提醒時間"""
+        chat_id = update.effective_chat.id
+        if not context.args:
+            await update.message.reply_text("請提供時間。範例：`/settime 08:00, 13:30` (支援多個時間，請以逗號隔開)")
+            return
+
+        time_str = " ".join(context.args)
+        # 簡單解析與格式檢查
+        try:
+            times = [t.strip() for t in time_str.replace('，', ',').split(',')]
+            valid_times = []
+            for t in times:
+                # 檢查 HH:MM 格式
+                import re
+                if re.match(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$', t):
+                    valid_times.append(t)
+                else:
+                    await update.message.reply_text(f"❌ 格式錯誤：『{t}』不是有效的時間格式 (HH:MM)。")
+                    return
+            
+            await self.firestore.set_user_reminder_times(chat_id, valid_times)
+            await update.message.reply_text(f"✅ 提醒時間已更新為：{', '.join(valid_times)}")
+        except Exception as e:
+            await update.message.reply_text(f"❌ 設定失敗：{e}")
 
     async def handle_health(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """檢查系統健康狀態"""

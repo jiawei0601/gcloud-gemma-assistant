@@ -130,6 +130,7 @@ def initialize_components():
 async def send_reminder_to_all():
     """
     發送提醒給所有活躍使用者。
+    [動態提醒版] 會檢查每個使用者的設定時間是否與當前時間匹配。
     """
     if not tg_adapter or not firestore_client:
         return
@@ -139,19 +140,50 @@ async def send_reminder_to_all():
         logger.warning("Reminder triggered but system not initialized yet.")
         return
 
+    # 獲取台北時間
+    from datetime import datetime, timedelta
+    import pytz
+    tz = pytz.timezone('Asia/Taipei')
+    now = datetime.now(tz)
+    current_time_str = now.strftime("%H:%M")
+    
+    logger.info(f"🔔 [REMINDER] 啟動檢查 (當前台北時間: {current_time_str})")
+
     users = await firestore_client.get_all_active_users()
-    for chat_id in users:
-        todos = await firestore_client.get_pending_todos(chat_id)
-        if todos:
-            text = "⏰ **定期待辦事項提醒**\n\n您還有以下未完成事項：\n"
-            for i, todo in enumerate(todos, 1):
-                text += f"{i}. {todo['task']}\n"
-            
+    for user_data in users:
+        chat_id = user_data.get("chat_id")
+        settings = user_data.get("reminder_times", ["08:00", "13:30"])
+        
+        # 檢查是否在提醒時間內 (容許 15 分鐘的誤差，防止 Scheduler 延遲)
+        should_remind = False
+        for t_str in settings:
             try:
-                await tg_adapter.application.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')
-                logger.info(f"Sent reminder to {chat_id}")
+                target_h, target_m = map(int, t_str.split(':'))
+                target_time = now.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
+                
+                # 如果當前時間在目標時間的 0~29 分鐘內，則觸發
+                # (適合每 30 分鐘執行一次的 Scheduler)
+                diff = (now - target_time).total_seconds()
+                if 0 <= diff < 1800: 
+                    should_remind = True
+                    break
             except Exception as e:
-                logger.error(f"Failed to send reminder to {chat_id}: {e}")
+                logger.error(f"Time parsing error for user {chat_id}: {e}")
+
+        if should_remind:
+            todos = await firestore_client.get_pending_todos(chat_id)
+            if todos:
+                text = "⏰ **您的定期待辦事項提醒**\n\n您還有以下未完成事項：\n"
+                for i, todo in enumerate(todos, 1):
+                    text += f"{i}. {todo['task']}\n"
+                
+                try:
+                    await tg_adapter.application.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')
+                    logger.info(f"✅ Sent dynamic reminder to {chat_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send reminder to {chat_id}: {e}")
+            else:
+                logger.info(f"ℹ️ No pending todos for {chat_id}, skipping.")
 
 # 首次請求時初始化
 with app.app_context():
