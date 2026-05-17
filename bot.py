@@ -87,6 +87,16 @@ def initialize_components():
     # 3. 建立 Async Loop
     main_loop = asyncio.new_event_loop()
     
+    # 3.5 初始化 Google Drive / Docs / Sheets 交付引擎並連結至 GeminiClient
+    from src.delivery.engine import GoogleDeliveryEngine
+    from src.delivery.google_drive_provider import GoogleDriveProvider
+    try:
+        delivery_engine = GoogleDeliveryEngine()
+        drive_provider = GoogleDriveProvider(delivery_engine)
+        gemini_client.set_drive_provider(drive_provider, main_loop)
+    except Exception as e:
+        logger.error(f"💥 整合 Google Drive/Docs/Sheets 失敗: {e}", exc_info=True)
+    
     # 4. 啟動背景線程
     def run_loop():
         asyncio.set_event_loop(main_loop)
