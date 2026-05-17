@@ -48,7 +48,13 @@ class GeminiClient:
         async def _run():
             doc_id = await self.drive_provider.create_document_from_text(title, content)
             link = await self.drive_provider.get_shareable_link(doc_id)
-            return f"成功建立 Google 文件！\n文件 ID: {doc_id}\n分享連結: {link}"
+            import json
+            return json.dumps({
+                "status": "success",
+                "document_id": doc_id,
+                "shareable_link": link,
+                "message": "成功建立 Google 文件！"
+            }, ensure_ascii=False)
             
         try:
             future = asyncio.run_coroutine_threadsafe(_run(), self.main_loop)
@@ -118,7 +124,13 @@ class GeminiClient:
         async def _run():
             sheet_id = await self.drive_provider.create_spreadsheet(title)
             link = await self.drive_provider.get_shareable_link(sheet_id)
-            return f"成功建立 Google 試算表！\n試算表 ID: {sheet_id}\n分享連結: {link}"
+            import json
+            return json.dumps({
+                "status": "success",
+                "spreadsheet_id": sheet_id,
+                "shareable_link": link,
+                "message": "成功建立 Google 試算表！"
+            }, ensure_ascii=False)
             
         try:
             future = asyncio.run_coroutine_threadsafe(_run(), self.main_loop)
@@ -164,23 +176,25 @@ class GeminiClient:
             logger.error(f"read_google_sheet failed: {e}", exc_info=True)
             return f"讀取試算表失敗: {e}"
 
-    def update_google_sheet(self, spreadsheet_id: str, range_name: str, csv_data: str) -> str:
+    def update_google_sheet(self, spreadsheet_id: str, range_name: str, values: list[list[str]]) -> str:
         """更新或修改已存在的 Google 試算表 (Google Sheet) 的單元格數值。
         參數:
           spreadsheet_id: Google 試算表的唯一 ID
           range_name: 更新範圍 (例如 'Sheet1!A1:D5')
-          csv_data: 寫入的二維數據，請使用逗號與換行符分隔的 CSV 格式字串
+          values: 寫入的二維數據，必須是巢狀的二維字串陣列 (例如 [['日期', '時間'], ['2026-05-17', '21:18']])
         """
         if not self.drive_provider or not self.main_loop:
             return "錯誤：Google Drive 服務未在背景執行緒中初始化"
         
-        f = StringIO(csv_data)
-        reader = csv.reader(f)
-        values = list(reader)
-        
         async def _run():
             await self.drive_provider.update_spreadsheet_values(spreadsheet_id, range_name, values)
-            return f"成功更新試算表 {spreadsheet_id} 範圍 {range_name} 內的資料。"
+            import json
+            return json.dumps({
+                "status": "success",
+                "spreadsheet_id": spreadsheet_id,
+                "range_name": range_name,
+                "message": "成功更新試算表資料！"
+            }, ensure_ascii=False)
             
         try:
             future = asyncio.run_coroutine_threadsafe(_run(), self.main_loop)
