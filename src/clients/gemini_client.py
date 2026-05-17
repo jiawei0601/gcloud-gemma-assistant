@@ -32,6 +32,14 @@ class GeminiClient:
 
         tools = [types.Tool(google_search=types.GoogleSearch())] if use_search else []
         
+        safety_settings = [
+            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_ONLY_HIGH"),
+            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_ONLY_HIGH"),
+            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_ONLY_HIGH"),
+            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_ONLY_HIGH"),
+            types.SafetySetting(category="HARM_CATEGORY_CIVIC_INTEGRITY", threshold="BLOCK_ONLY_HIGH"),
+        ]
+
         try:
             # 改回同步調用，避免迴圈衝突
             response = self.client.models.generate_content(
@@ -41,17 +49,25 @@ class GeminiClient:
                     system_instruction=persona,
                     tools=tools,
                     temperature=0.2,
+                    safety_settings=safety_settings
                 )
             )
             
+            # 檢查是否有候選回應
+            if not response.candidates or not response.candidates[0].content.parts:
+                finish_reason = response.candidates[0].finish_reason if response.candidates else "UNKNOWN"
+                error_msg = f"模型未生成內容 (原因: {finish_reason})"
+                logging.warning(f"[GeminiClient] {error_msg}")
+                return {"success": False, "text": error_msg}
+
             return {
                 "success": True,
-                "text": response.text if response.text else "無回應內容",
+                "text": response.text,
                 "usage": response.usage_metadata
             }
         except Exception as e:
             logging.error(f"[GeminiClient] 專家同步調用失敗: {e}")
-            return {"success": False, "text": str(e)}
+            return {"success": False, "text": f"API 錯誤: {str(e)}"}
 
     def ask(self, prompt: str) -> Tuple[bool, str]:
         if not self.client:
