@@ -24,7 +24,7 @@ class GoogleDeliveryEngine:
         self._drive_service = None
         self._docs_service = None
         self.scopes = [
-            'https://www.googleapis.com/auth/drive.file',
+            'https://www.googleapis.com/auth/drive',
             'https://www.googleapis.com/auth/documents',
             'https://www.googleapis.com/auth/spreadsheets'
         ]
