@@ -1,0 +1,10 @@
+# Sensitives
+credentials.json
+token.json
+
+# Cache
+__pycache__/
+*.pyc
+
+# Scratch directory
+scratch/
