@@ -20,7 +20,12 @@ class GoogleDeliveryEngine:
     
     def __init__(self, credentials_path: str = "credentials.json", token_path: str = "token.json"):
         self.credentials_path = credentials_path
-        self.token_path = token_path
+        # 優先偵測雲端 Secret Manager 掛載路徑，避免覆蓋整個 /app 目錄
+        if os.path.exists("/secrets/token.json"):
+            self.token_path = "/secrets/token.json"
+            logger.info("🔑 [GoogleDeliveryEngine] 偵測到雲端掛載密鑰：/secrets/token.json")
+        else:
+            self.token_path = token_path
         self._drive_service = None
         self._docs_service = None
         self.scopes = [
