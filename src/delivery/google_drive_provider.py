@@ -15,27 +15,10 @@ class GoogleDriveProvider(BaseDeliveryProvider):
 
     async def _find_shared_folder_id(self) -> Optional[str]:
         """尋找使用者分享給服務帳戶的資料夾"""
-        try:
-            from typing import Optional
-            service = await self.engine.get_service('drive', 'v3')
-            query = "mimeType = 'application/vnd.google-apps.folder' and sharedWithMe = true and trashed = false"
-            request = service.files().list(q=query, fields="files(id, name)", pageSize=15)
-            response = await self.engine.execute_api(request)
-            files = response.get('files', [])
-            if files:
-                # 優先使用包含關鍵字的資料夾，例如 'AG', 'ASSISTANT', 'BOT', 'REPORT' 等
-                parent_id = files[0]['id']
-                for f in files:
-                    name = f.get('name', '').upper()
-                    if any(kw in name for kw in ['AG', 'ASSISTANT', 'AI', 'DRIVE', 'BOT', 'REPORT']):
-                        parent_id = f['id']
-                        logger.info(f"📂 [GoogleDriveProvider] 優先選用分享資料夾: {f.get('name')} (ID: {parent_id})")
-                        return parent_id
-                logger.info(f"📂 [GoogleDriveProvider] 使用首個偵測到的分享資料夾 (ID: {parent_id})")
-                return parent_id
-        except Exception as e:
-            logger.warning(f"⚠️ [GoogleDriveProvider] 搜尋分享資料夾失敗: {e}")
-        return None
+        # 使用者指定的硬性資料夾優先，確保所有建立的檔案/資料夾均儲存於此目錄下
+        target_folder_id = "1B3YXNsgDV2KesrBtrRN2QEeVO7OuWPcf"
+        logger.info(f"📂 [GoogleDriveProvider] 鎖定使用者指定儲存資料夾 ID: {target_folder_id}")
+        return target_folder_id
 
     async def create_folder(self, folder_name: str) -> str:
         service = await self.engine.get_service('drive', 'v3')
