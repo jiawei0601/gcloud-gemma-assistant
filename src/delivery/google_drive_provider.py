@@ -13,18 +13,49 @@ class GoogleDriveProvider(BaseDeliveryProvider):
     def __init__(self, engine: GoogleDeliveryEngine):
         self.engine = engine
 
+    async def _find_shared_folder_id(self) -> Optional[str]:
+        """尋找使用者分享給服務帳戶的資料夾"""
+        try:
+            from typing import Optional
+            service = await self.engine.get_service('drive', 'v3')
+            query = "mimeType = 'application/vnd.google-apps.folder' and sharedWithMe = true and trashed = false"
+            request = service.files().list(q=query, fields="files(id, name)", pageSize=15)
+            response = await self.engine.execute_api(request)
+            files = response.get('files', [])
+            if files:
+                # 優先使用包含關鍵字的資料夾，例如 'AG', 'ASSISTANT', 'BOT', 'REPORT' 等
+                parent_id = files[0]['id']
+                for f in files:
+                    name = f.get('name', '').upper()
+                    if any(kw in name for kw in ['AG', 'ASSISTANT', 'AI', 'DRIVE', 'BOT', 'REPORT']):
+                        parent_id = f['id']
+                        logger.info(f"📂 [GoogleDriveProvider] 優先選用分享資料夾: {f.get('name')} (ID: {parent_id})")
+                        return parent_id
+                logger.info(f"📂 [GoogleDriveProvider] 使用首個偵測到的分享資料夾 (ID: {parent_id})")
+                return parent_id
+        except Exception as e:
+            logger.warning(f"⚠️ [GoogleDriveProvider] 搜尋分享資料夾失敗: {e}")
+        return None
+
     async def create_folder(self, folder_name: str) -> str:
         service = await self.engine.get_service('drive', 'v3')
+        parent_id = await self._find_shared_folder_id()
         file_metadata = {
             'name': folder_name,
             'mimeType': 'application/vnd.google-apps.folder'
         }
+        if parent_id:
+            file_metadata['parents'] = [parent_id]
+            
         request = service.files().create(body=file_metadata, fields='id')
         response = await self.engine.execute_api(request)
         return response.get('id')
 
     async def upload_file(self, content: str, filename: str, parent_id: Optional[str] = None) -> str:
         service = await self.engine.get_service('drive', 'v3')
+        if not parent_id:
+            parent_id = await self._find_shared_folder_id()
+            
         file_metadata = {'name': filename}
         if parent_id:
             file_metadata['parents'] = [parent_id]
@@ -54,7 +85,9 @@ class GoogleDriveProvider(BaseDeliveryProvider):
     async def create_document_from_text(self, title: str, content: str, parent_id: Optional[str] = None) -> str:
         """透過上傳 HTML 並由 Drive API 自動轉換為 Google Docs 格式"""
         service = await self.engine.get_service('drive', 'v3')
-        
+        if not parent_id:
+            parent_id = await self._find_shared_folder_id()
+            
         # 簡單的 HTML 封裝以利格式轉換
         safe_content = content.replace('\n', '<br>')
         html_content = f"<html><body><h2>{title}</h2><p>{safe_content}</p></body></html>"
@@ -109,31 +142,20 @@ class GoogleDriveProvider(BaseDeliveryProvider):
 
     async def create_spreadsheet(self, title: str, parent_id: Optional[str] = None) -> str:
         """建立 Google Sheet 並回傳 spreadsheet_id"""
-        service = await self.engine.get_service('sheets', 'v4')
-        spreadsheet_body = {
-            'properties': {
-                'title': title
-            }
+        drive_service = await self.engine.get_service('drive', 'v3')
+        if not parent_id:
+            parent_id = await self._find_shared_folder_id()
+            
+        file_metadata = {
+            'name': title,
+            'mimeType': 'application/vnd.google-apps.spreadsheet'
         }
-        request = service.spreadsheets().create(body=spreadsheet_body, fields='spreadsheetId')
+        if parent_id:
+            file_metadata['parents'] = [parent_id]
+            
+        request = drive_service.files().create(body=file_metadata, fields='id')
         response = await self.engine.execute_api(request)
-        spreadsheet_id = response.get('spreadsheetId')
-        
-        if parent_id and spreadsheet_id:
-            drive_service = await self.engine.get_service('drive', 'v3')
-            file_req = drive_service.files().get(fileId=spreadsheet_id, fields='parents')
-            file_res = await self.engine.execute_api(file_req)
-            previous_parents = ",".join(file_res.get('parents', []))
-            
-            move_req = drive_service.files().update(
-                fileId=spreadsheet_id,
-                addParents=parent_id,
-                removeParents=previous_parents,
-                fields='id, parents'
-            )
-            await self.engine.execute_api(move_req)
-            
-        return spreadsheet_id
+        return response.get('id')
 
     async def read_spreadsheet(self, spreadsheet_id: str, range_name: str) -> list:
         """讀取 Google Sheet 指定範圍的數據"""

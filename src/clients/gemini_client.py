@@ -55,6 +55,18 @@ class GeminiClient:
             return future.result(timeout=30)
         except Exception as e:
             logger.error(f"create_google_doc failed: {e}", exc_info=True)
+            if "storageQuotaExceeded" in str(e):
+                return (
+                    "⚠️ 建立文件失敗：雲端儲存空間配額不足！\n\n"
+                    "原因說明：\n"
+                    "由於 Google API 限制，助理服務帳戶本身的個人空間為 0MB。因此無法直接建立檔案於它的 Root 目錄下。\n\n"
+                    "解決方案（非常簡單）：\n"
+                    "1. 請在您的 Google Drive 建立一個新資料夾（例如命名為「AG助理雲端資料夾」）。\n"
+                    "2. 將該資料夾【共用 (Share)】給助理電子郵件：\n"
+                    "👉 927751279284-compute@developer.gserviceaccount.com\n"
+                    "3. 共用時請確認將助理的權限設定為【編輯者 (Editor)】。\n\n"
+                    "完成後，請重新對我說，助理將會自動偵測到您分享的資料夾，並將所有文件完美地儲存到該共用資料夾內！"
+                )
             return f"建立文件失敗: {e}"
 
     def read_google_doc(self, document_id: str) -> str:
@@ -113,6 +125,18 @@ class GeminiClient:
             return future.result(timeout=30)
         except Exception as e:
             logger.error(f"create_google_sheet failed: {e}", exc_info=True)
+            if "storageQuotaExceeded" in str(e):
+                return (
+                    "⚠️ 建立試算表失敗：雲端儲存空間配額不足！\n\n"
+                    "原因說明：\n"
+                    "由於 Google API 限制，助理服務帳戶本身的個人空間為 0MB。因此無法直接建立檔案於它的 Root 目錄下。\n\n"
+                    "解決方案（非常簡單）：\n"
+                    "1. 請在您的 Google Drive 建立一個新資料夾（例如命名為「AG助理雲端資料夾」）。\n"
+                    "2. 將該資料夾【共用 (Share)】給助理電子郵件：\n"
+                    "👉 927751279284-compute@developer.gserviceaccount.com\n"
+                    "3. 共用時請確認將助理的權限設定為【編輯者 (Editor)】。\n\n"
+                    "完成後，請重新對我說，助理將會自動偵測到您分享的資料夾，並將所有文件完美地儲存到該共用資料夾內！"
+                )
             return f"建立試算表失敗: {e}"
 
     def read_google_sheet(self, spreadsheet_id: str, range_name: str = "Sheet1!A1:Z100") -> str:
