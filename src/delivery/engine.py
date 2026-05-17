@@ -25,7 +25,8 @@ class GoogleDeliveryEngine:
         self._docs_service = None
         self.scopes = [
             'https://www.googleapis.com/auth/drive.file',
-            'https://www.googleapis.com/auth/documents'
+            'https://www.googleapis.com/auth/documents',
+            'https://www.googleapis.com/auth/spreadsheets'
         ]
 
     async def _get_credentials(self):

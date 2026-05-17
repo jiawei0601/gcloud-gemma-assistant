@@ -23,3 +23,28 @@ class BaseDeliveryProvider(ABC):
     async def create_document_from_text(self, title: str, content: str, parent_id: Optional[str] = None) -> str:
         """將文字/Markdown 轉換為文件格式並儲存"""
         pass
+
+    @abstractmethod
+    async def read_document(self, document_id: str) -> str:
+        """讀取 Google Doc 內容並回傳純文字"""
+        pass
+
+    @abstractmethod
+    async def append_to_document(self, document_id: str, text: str) -> None:
+        """在 Google Doc 尾端追加文字"""
+        pass
+
+    @abstractmethod
+    async def create_spreadsheet(self, title: str, parent_id: Optional[str] = None) -> str:
+        """建立 Google Sheet 並回傳 spreadsheet_id"""
+        pass
+
+    @abstractmethod
+    async def read_spreadsheet(self, spreadsheet_id: str, range_name: str) -> list:
+        """讀取 Google Sheet 指定範圍的數據"""
+        pass
+
+    @abstractmethod
+    async def update_spreadsheet_values(self, spreadsheet_id: str, range_name: str, values: list) -> None:
+        """更新 Google Sheet 指定範圍的單元格數據"""
+        pass

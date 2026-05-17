@@ -72,3 +72,89 @@ class GoogleDriveProvider(BaseDeliveryProvider):
         request = service.files().create(body=file_metadata, media_body=media, fields='id')
         response = await self.engine.execute_api(request)
         return response.get('id')
+
+    async def read_document(self, document_id: str) -> str:
+        """讀取 Google Doc 內容並回傳純文字"""
+        service = await self.engine.get_service('docs', 'v1')
+        request = service.documents().get(documentId=document_id)
+        doc = await self.engine.execute_api(request)
+        
+        text = ""
+        doc_content = doc.get('body', {}).get('content', [])
+        for element in doc_content:
+            if 'paragraph' in element:
+                elements = element.get('paragraph', {}).get('elements', [])
+                for text_run in elements:
+                    if 'textRun' in text_run:
+                        text += text_run.get('textRun', {}).get('content', '')
+        return text
+
+    async def append_to_document(self, document_id: str, text: str) -> None:
+        """在 Google Doc 尾端追加文字"""
+        service = await self.engine.get_service('docs', 'v1')
+        body = {
+            'requests': [
+                {
+                    'insertText': {
+                        'text': text,
+                        'endOfSegmentLocation': {
+                            'segmentId': ''
+                        }
+                    }
+                }
+            ]
+        }
+        request = service.documents().batchUpdate(documentId=document_id, body=body)
+        await self.engine.execute_api(request)
+
+    async def create_spreadsheet(self, title: str, parent_id: Optional[str] = None) -> str:
+        """建立 Google Sheet 並回傳 spreadsheet_id"""
+        service = await self.engine.get_service('sheets', 'v4')
+        spreadsheet_body = {
+            'properties': {
+                'title': title
+            }
+        }
+        request = service.spreadsheets().create(body=spreadsheet_body, fields='spreadsheetId')
+        response = await self.engine.execute_api(request)
+        spreadsheet_id = response.get('spreadsheetId')
+        
+        if parent_id and spreadsheet_id:
+            drive_service = await self.engine.get_service('drive', 'v3')
+            file_req = drive_service.files().get(fileId=spreadsheet_id, fields='parents')
+            file_res = await self.engine.execute_api(file_req)
+            previous_parents = ",".join(file_res.get('parents', []))
+            
+            move_req = drive_service.files().update(
+                fileId=spreadsheet_id,
+                addParents=parent_id,
+                removeParents=previous_parents,
+                fields='id, parents'
+            )
+            await self.engine.execute_api(move_req)
+            
+        return spreadsheet_id
+
+    async def read_spreadsheet(self, spreadsheet_id: str, range_name: str) -> list:
+        """讀取 Google Sheet 指定範圍的數據"""
+        service = await self.engine.get_service('sheets', 'v4')
+        request = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=range_name
+        )
+        response = await self.engine.execute_api(request)
+        return response.get('values', [])
+
+    async def update_spreadsheet_values(self, spreadsheet_id: str, range_name: str, values: list) -> None:
+        """更新 Google Sheet 指定範圍的單元格數據"""
+        service = await self.engine.get_service('sheets', 'v4')
+        body = {
+            'values': values
+        }
+        request = service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            valueInputOption='USER_ENTERED',
+            body=body
+        )
+        await self.engine.execute_api(request)
