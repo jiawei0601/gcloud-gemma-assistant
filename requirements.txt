@@ -10,3 +10,4 @@ python-telegram-bot
 beautifulsoup4
 httpx
 pytz
+google-auth-oauthlib
