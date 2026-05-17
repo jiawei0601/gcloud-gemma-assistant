@@ -151,8 +151,8 @@ async def send_reminder_to_all():
 
     users = await firestore_client.get_all_active_users()
     for user_data in users:
-        chat_id = user_data.get("chat_id")
-        settings = user_data.get("reminder_times", ["08:00", "13:30"])
+        chat_id = user_data.chat_id
+        settings = user_data.reminder_times
         
         # 檢查是否在提醒時間內 (容許 15 分鐘的誤差，防止 Scheduler 延遲)
         should_remind = False
@@ -175,7 +175,7 @@ async def send_reminder_to_all():
             if todos:
                 text = "⏰ **您的定期待辦事項提醒**\n\n您還有以下未完成事項：\n"
                 for i, todo in enumerate(todos, 1):
-                    text += f"{i}. {todo['task']}\n"
+                    text += f"{i}. {todo.task}\n"
                 
                 try:
                     await tg_adapter.application.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')
