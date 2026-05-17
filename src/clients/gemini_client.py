@@ -176,19 +176,27 @@ class GeminiClient:
             logger.error(f"read_google_sheet failed: {e}", exc_info=True)
             return f"讀取試算表失敗: {e}"
 
-    def update_google_sheet(self, spreadsheet_id: str, range_name: str, values: list[list[str]]) -> str:
+    def update_google_sheet(self, spreadsheet_id: str, range_name: str, values_json: str) -> str:
         """更新或修改已存在的 Google 試算表 (Google Sheet) 的單元格數值。
         參數:
           spreadsheet_id: Google 試算表的唯一 ID
           range_name: 更新範圍 (例如 'Sheet1!A1:D5')
-          values: 寫入的二維數據，必須是巢狀的二維字串陣列 (例如 [['日期', '時間'], ['2026-05-17', '21:18']])
+          values_json: 寫入的二維數據，必須是二維陣列的 JSON 字串，例如 '[["2026-05-17", "21:18"]]' 或 '[["日期", "時間"], ["2026-05-17", "21:18"]]'
         """
         if not self.drive_provider or not self.main_loop:
             return "錯誤：Google Drive 服務未在背景執行緒中初始化"
         
+        import json
+        try:
+            values = json.loads(values_json)
+            if not isinstance(values, list) or any(not isinstance(row, list) for row in values):
+                raise ValueError("JSON 資料必須是二維陣列 (Nested List)")
+        except Exception as e:
+            logger.error(f"update_google_sheet JSON parse failed: {e}")
+            return f"更新試算表失敗：values_json 參數解析錯誤，必須為二維陣列 JSON。錯誤資訊: {e}"
+        
         async def _run():
             await self.drive_provider.update_spreadsheet_values(spreadsheet_id, range_name, values)
-            import json
             return json.dumps({
                 "status": "success",
                 "spreadsheet_id": spreadsheet_id,
