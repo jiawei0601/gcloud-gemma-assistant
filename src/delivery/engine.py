@@ -38,12 +38,20 @@ class GoogleDeliveryEngine:
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 await asyncio.get_event_loop().run_in_executor(None, creds.refresh, Request())
-            else:
+            elif os.path.exists(self.credentials_path):
                 flow = InstalledAppFlow.from_client_secrets_file(self.credentials_path, self.scopes)
                 creds = await asyncio.get_event_loop().run_in_executor(None, flow.run_local_server, 0)
-            
-            with open(self.token_path, 'w') as token:
-                token.write(creds.to_json())
+                with open(self.token_path, 'w') as token:
+                    token.write(creds.to_json())
+            else:
+                logger.info("🔑 [GoogleDeliveryEngine] 未偵測到 credentials.json，正在嘗試使用 Application Default Credentials (ADC)...")
+                try:
+                    import google.auth
+                    creds, project = google.auth.default(scopes=self.scopes)
+                    logger.info("✅ [GoogleDeliveryEngine] 成功取得 Application Default Credentials (ADC)！")
+                except Exception as e:
+                    logger.error(f"❌ [GoogleDeliveryEngine] 無法取得 Application Default Credentials: {e}")
+                    raise e
         return creds
 
     async def get_service(self, service_name: str, version: str):
