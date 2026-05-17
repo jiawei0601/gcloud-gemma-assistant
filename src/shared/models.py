@@ -1,7 +1,7 @@
 from __future__ import annotations
 from enum import Enum
 from uuid import UUID, uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
@@ -61,3 +61,21 @@ class ResearchTask(BaseModel):
 
 # 為了處理 Pydantic 循環引用或未來擴充，建議加上此註解
 ResearchTask.model_rebuild()
+
+class UserSettings(BaseModel):
+    """
+    使用者設定：儲存使用者的 Telegram ID 與提醒時間。
+    """
+    chat_id: str = Field(..., description="Telegram Chat ID")
+    last_active: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    reminder_times: List[str] = Field(default_factory=lambda: ["08:00", "13:30"])
+
+class TodoItem(BaseModel):
+    """
+    待辦事項：單個使用者的待辦工作。
+    """
+    id: Optional[str] = Field(None, description="Firestore 文件 ID")
+    chat_id: str = Field(..., description="Telegram Chat ID")
+    task: str = Field(..., description="待辦內容")
+    status: str = Field("pending", description="狀態：pending 或 completed")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

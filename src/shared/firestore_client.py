@@ -1,7 +1,10 @@
 import logging
+from typing import List, Optional
 from google.cloud import firestore
 from google.api_core import exceptions
 from datetime import datetime, timezone
+
+from src.shared.models import UserSettings, TodoItem
 
 logger = logging.getLogger(__name__)
 
@@ -68,14 +71,12 @@ class FirestoreClient:
 
     async def save_user_chat(self, chat_id: str):
         """
-        記錄使用者的 Chat ID 並初始化預設提醒時間。
+        記錄使用者的 Chat ID 並初始化預設提醒時間（使用 UserSettings Pydantic 模型）。
         """
         doc_ref = self.db.collection("users").document(str(chat_id))
-        await doc_ref.set({
-            "chat_id": str(chat_id),
-            "last_active": datetime.now(timezone.utc),
-            "reminder_times": ["08:00", "13:30"] # 預設時間
-        }, merge=True)
+        user_settings = UserSettings(chat_id=str(chat_id))
+        await doc_ref.set(user_settings.model_dump(), merge=True)
+        logger.info(f"Saved user chat settings for {chat_id}")
 
     async def set_user_reminder_times(self, chat_id: str, times: list):
         """
@@ -87,45 +88,58 @@ class FirestoreClient:
         })
         logger.info(f"Updated reminder times for {chat_id}: {times}")
 
-    async def get_user_settings(self, chat_id: str):
+    async def get_user_settings(self, chat_id: str) -> Optional[UserSettings]:
         """
-        獲取使用者的設定。
+        獲取使用者的設定，回傳驗證後的 UserSettings 物件。
         """
         doc_ref = self.db.collection("users").document(str(chat_id))
         doc = await doc_ref.get()
-        return doc.to_dict() if doc.exists else None
+        if doc.exists:
+            try:
+                return UserSettings.model_validate(doc.to_dict())
+            except Exception as e:
+                logger.error(f"Error validating user settings for {chat_id}: {e}")
+        return None
 
     async def add_todo(self, chat_id: str, task_text: str):
         """
-        新增待辦事項。
+        新增待辦事項（使用 TodoItem Pydantic 模型）。
         """
         doc_ref = self.db.collection("todos").document()
-        await doc_ref.set({
-            "chat_id": str(chat_id),
-            "task": task_text,
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc)
-        })
+        todo = TodoItem(chat_id=str(chat_id), task=task_text)
+        await doc_ref.set(todo.model_dump())
         logger.info(f"Added todo for chat {chat_id}: {task_text}")
 
-    async def get_pending_todos(self, chat_id: str):
+    async def get_pending_todos(self, chat_id: str) -> List[TodoItem]:
         """
-        獲取特定使用者的待辦事項。
+        獲取特定使用者的待辦事項，回傳驗證後的 TodoItem 列表。
         """
         todos_ref = self.db.collection("todos")
         query = todos_ref.where("chat_id", "==", str(chat_id)).where("status", "==", "pending")
-        # stream() 不需要 await，它回傳的是 AsyncStreamGenerator
         docs = query.stream()
-        return [{"id": d.id, **d.to_dict()} async for d in docs]
+        
+        items = []
+        async for d in docs:
+            try:
+                items.append(TodoItem.model_validate({"id": d.id, **d.to_dict()}))
+            except Exception as e:
+                logger.error(f"Error validating todo item {d.id}: {e}")
+        return items
 
-    async def get_all_active_users(self):
+    async def get_all_active_users(self) -> List[UserSettings]:
         """
-        獲取所有活躍使用者及其設定。
+        獲取所有活躍使用者及其設定，回傳驗證後的 UserSettings 列表。
         """
         users_ref = self.db.collection("users")
-        # stream() 不需要 await
         docs = users_ref.stream()
-        return [d.to_dict() async for d in docs]
+        
+        users = []
+        async for d in docs:
+            try:
+                users.append(UserSettings.model_validate(d.to_dict()))
+            except Exception as e:
+                logger.error(f"Error validating active user data: {e}")
+        return users
 
     async def mark_completed(self, update_id: str):
         """

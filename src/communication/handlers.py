@@ -220,6 +220,6 @@ class TelegramCommandHandler:
 
         text = "📝 **您的未完成事項清單：**\n\n"
         for i, todo in enumerate(todos, 1):
-            text += f"{i}. {todo['task']}\n"
+            text += f"{i}. {todo.task}\n"
         
         await update.message.reply_text(text, parse_mode='Markdown')
