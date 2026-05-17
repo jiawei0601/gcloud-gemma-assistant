@@ -167,7 +167,7 @@ class GeminiClient:
 
     # --- 核心詢問入口 ---
 
-    def ask_expert_sync(self, persona: str, prompt: str, use_search: bool = True) -> Dict[str, Any]:
+    def ask_expert_sync(self, persona: str, prompt: str, use_search: bool = True, use_drive: bool = False) -> Dict[str, Any]:
         """
         同步調用專家 Agent。
         """
@@ -179,8 +179,8 @@ class GeminiClient:
         if use_search:
             api_tools.append(types.Tool(google_search=types.GoogleSearch()))
         
-        # 如果已經加載了雲端硬碟服務，將所有的 Docs & Sheets CRUD 方法作為 Tool 暴露給模型
-        if self.drive_provider:
+        # 只有在明確啟用且加載了雲端硬碟服務時，才載入 Docs & Sheets 工具 (不與 Google Search 混用)
+        if use_drive and self.drive_provider:
             api_tools.extend([
                 self.create_google_doc,
                 self.read_google_doc,

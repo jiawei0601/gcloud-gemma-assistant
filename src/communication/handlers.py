@@ -105,10 +105,10 @@ class TelegramCommandHandler:
         
         await update.message.reply_text(status_text, parse_mode='Markdown')
 
-    async def _run_agent_task(self, persona: str, topic: str, use_search: bool = True):
+    async def _run_agent_task(self, persona: str, topic: str, use_search: bool = True, use_drive: bool = False):
         """運行單個 Agent 任務的包裝器"""
         async with self.semaphore:
-            return await asyncio.to_thread(self.gemini.ask_expert_sync, persona, topic, use_search=use_search)
+            return await asyncio.to_thread(self.gemini.ask_expert_sync, persona, topic, use_search=use_search, use_drive=use_drive)
 
     async def handle_research(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.effective_chat.id
@@ -183,7 +183,7 @@ class TelegramCommandHandler:
         
         try:
             # 1. 正常回覆
-            res = await self._run_agent_task(CHAT_PERSONA, user_text, use_search=True)
+            res = await self._run_agent_task(CHAT_PERSONA, user_text, use_search=False, use_drive=True)
             if res.get("success"):
                 await self._safe_send_or_edit(wait_msg, res['text'])
             else:
